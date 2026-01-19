@@ -1,4 +1,5 @@
 AGENTS.md
+.env
 .venv/*
 .uv-cache/*
 output/*

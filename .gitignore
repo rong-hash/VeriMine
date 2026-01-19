@@ -5,3 +5,4 @@ AGENTS.md
 output/*
 **/__pycache__/
 hwrepo_pipeline.egg-info/*
+CLAUDE.md

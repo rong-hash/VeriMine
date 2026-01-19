@@ -95,3 +95,46 @@ def load_config(path: str | Path | None) -> PipelineConfig:
             setattr(config, key, value)
 
     return config
+
+
+# --- Commit Miner Configuration ---
+
+
+@dataclass
+class MinerConfig:
+    """Configuration for the commit miner."""
+
+    # Lookback period
+    lookback_days: int = 365
+
+    # PR mining limits
+    max_prs_per_repo: int = 500
+
+    # Commit mining limits
+    max_commits_per_repo: int = 1000
+
+    # Clustering parameters
+    cluster_time_window_hours: int = 24
+    enable_cluster_mining: bool = True
+
+    # Minimum change thresholds
+    min_code_changes: int = 5
+    min_test_changes: int = 5
+
+    # API options
+    use_graphql: bool = True
+
+
+def load_miner_config(path: str | Path | None) -> MinerConfig:
+    """Load miner configuration from JSON file."""
+    if path is None:
+        return MinerConfig()
+
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    config = MinerConfig()
+
+    for key, value in data.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+
+    return config

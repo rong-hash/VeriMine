@@ -139,3 +139,206 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/tags", params={"per_page": per_page}
         )
         return data, headers
+
+    # --- Commit Miner API Methods ---
+
+    def list_merged_prs_graphql(
+        self,
+        owner: str,
+        repo: str,
+        max_prs: int = 100,
+        since: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch merged PRs using GraphQL for efficiency."""
+        query = """
+        query($owner: String!, $repo: String!, $cursor: String) {
+            repository(owner: $owner, name: $repo) {
+                pullRequests(
+                    first: 50,
+                    after: $cursor,
+                    states: [MERGED],
+                    orderBy: {field: UPDATED_AT, direction: DESC}
+                ) {
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                    nodes {
+                        number
+                        title
+                        mergedAt
+                        baseRefOid
+                        mergeCommit {
+                            oid
+                        }
+                        author {
+                            login
+                        }
+                        files(first: 100) {
+                            nodes {
+                                path
+                                additions
+                                deletions
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        prs: List[Dict[str, Any]] = []
+        cursor = None
+
+        while len(prs) < max_prs:
+            variables = {"owner": owner, "repo": repo, "cursor": cursor}
+            try:
+                data = self.post_graphql(query, variables)
+            except requests.HTTPError as e:
+                LOGGER.warning("GraphQL error fetching PRs: %s", e)
+                break
+
+            repo_data = data.get("repository")
+            if not repo_data:
+                break
+
+            pr_data = repo_data.get("pullRequests", {})
+            nodes = pr_data.get("nodes", [])
+
+            for node in nodes:
+                if node is None:
+                    continue
+                merged_at = node.get("mergedAt")
+                if since and merged_at and merged_at < since:
+                    return prs
+                prs.append(node)
+                if len(prs) >= max_prs:
+                    break
+
+            page_info = pr_data.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        return prs
+
+    def list_merged_prs_rest(
+        self,
+        owner: str,
+        repo: str,
+        max_prs: int = 100,
+        since: Optional[str] = None,
+    ) -> Iterable[Dict[str, Any]]:
+        """Fetch merged PRs using REST API (fallback)."""
+        collected = 0
+        page = 1
+        per_page = 100
+
+        while collected < max_prs:
+            params = {
+                "state": "closed",
+                "sort": "updated",
+                "direction": "desc",
+                "per_page": per_page,
+                "page": page,
+            }
+            data, _ = self.get_json(f"/repos/{owner}/{repo}/pulls", params=params)
+
+            if not data:
+                break
+
+            for pr in data:
+                if pr.get("merged_at") is None:
+                    continue
+                if since and pr.get("merged_at") < since:
+                    return
+                yield pr
+                collected += 1
+                if collected >= max_prs:
+                    break
+
+            if len(data) < per_page:
+                break
+            page += 1
+
+    def get_pr_files(
+        self, owner: str, repo: str, pr_number: int
+    ) -> List[Dict[str, Any]]:
+        """Get files changed in a PR."""
+        files: List[Dict[str, Any]] = []
+        page = 1
+        per_page = 100
+
+        while True:
+            params = {"per_page": per_page, "page": page}
+            data, _ = self.get_json(
+                f"/repos/{owner}/{repo}/pulls/{pr_number}/files", params=params
+            )
+            if not data:
+                break
+            files.extend(data)
+            if len(data) < per_page:
+                break
+            page += 1
+
+        return files
+
+    def compare_commits(
+        self, owner: str, repo: str, base: str, head: str
+    ) -> Optional[Dict[str, Any]]:
+        """Compare two commits and get the diff."""
+        data, _ = self.get_json_or_none(
+            f"/repos/{owner}/{repo}/compare/{base}...{head}"
+        )
+        return data
+
+    def list_commits(
+        self,
+        owner: str,
+        repo: str,
+        sha: Optional[str] = None,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        max_commits: int = 100,
+    ) -> Iterable[Dict[str, Any]]:
+        """List commits on a repository."""
+        collected = 0
+        page = 1
+        per_page = 100
+
+        while collected < max_commits:
+            params: Dict[str, Any] = {"per_page": per_page, "page": page}
+            if sha:
+                params["sha"] = sha
+            if since:
+                params["since"] = since
+            if until:
+                params["until"] = until
+
+            data, _ = self.get_json(f"/repos/{owner}/{repo}/commits", params=params)
+
+            if not data:
+                break
+
+            for commit in data:
+                yield commit
+                collected += 1
+                if collected >= max_commits:
+                    break
+
+            if len(data) < per_page:
+                break
+            page += 1
+
+    def get_commit(self, owner: str, repo: str, sha: str) -> Optional[Dict[str, Any]]:
+        """Get details of a single commit including files."""
+        data, _ = self.get_json_or_none(f"/repos/{owner}/{repo}/commits/{sha}")
+        return data
+
+    def get_commit_files(
+        self, owner: str, repo: str, sha: str
+    ) -> List[Dict[str, Any]]:
+        """Get files changed in a specific commit."""
+        commit = self.get_commit(owner, repo, sha)
+        if not commit:
+            return []
+        return commit.get("files", [])

@@ -7,5 +7,9 @@ dependencies = [
   "requests>=2.31.0",
 ]
 
+[tool.setuptools]
+packages = ["hwrepo_pipeline"]
+
 [project.scripts]
 hwrepo-pipeline = "hwrepo_pipeline.__main__:main"
+hwrepo-miner = "hwrepo_pipeline.miner_cli:main"

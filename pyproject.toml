@@ -1,0 +1,11 @@
+[project]
+name = "hwrepo-pipeline"
+version = "0.1.0"
+description = "Hardware repo crawling pipeline"
+requires-python = ">=3.9"
+dependencies = [
+  "requests>=2.31.0",
+]
+
+[project.scripts]
+hwrepo-pipeline = "hwrepo_pipeline.__main__:main"

@@ -1,0 +1,58 @@
+{
+  "search_languages": [
+    "Verilog",
+    "SystemVerilog"
+  ],
+  "search_qualifiers": "fork:false archived:false",
+  "search_sort": "stars",
+  "search_order": "desc",
+  "max_repos_per_language": 50,
+  "pushed_within_days": 180,
+  "min_stars": 100,
+  "min_sv_ratio": 0.3,
+  "min_sv_files": 20,
+  "min_sv_lines": 3000,
+  "min_pr_total": 0,
+  "min_issue_total": 50,
+  "min_commit_last_12m": 100,
+  "min_commit_last_6m": 30,
+  "min_tags": 5,
+  "min_releases": 1,
+  "allowlist_terms": [
+    "iverilog",
+    "verilator",
+    "yosys",
+    "symbiyosys",
+    "sby",
+    "sv2v",
+    "surelog",
+    "uhdm",
+    "cocotb"
+  ],
+  "denylist_terms": [
+    "Synopsys VCS",
+    "VCS",
+    "xrun",
+    "xcelium",
+    "questa",
+    "modelsim",
+    "dc_shell",
+    "genus",
+    "innovus",
+    "primetime"
+  ],
+  "scan_paths": [
+    "README.md",
+    "README.rst",
+    "README.txt",
+    "README",
+    "CONTRIBUTING.md",
+    "CONTRIBUTING",
+    "Makefile",
+    "Dockerfile"
+  ],
+  "scan_workflows": true,
+  "scan_scripts_dir": true,
+  "max_script_files": 20,
+  "use_graphql": true
+}

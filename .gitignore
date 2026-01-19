@@ -1,0 +1,6 @@
+AGENTS.md
+.venv/*
+.uv-cache/*
+output/*
+__pycache__/*
+hwrepo_pipeline.egg-info/*

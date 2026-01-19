@@ -52,3 +52,4 @@ Config is JSON; see `config.example.json`. Common knobs:
 - `min_sv_lines` triggers per-file content pulls; set it to 0 for faster pilots.
 - The VCS deny rule is conservative to avoid false positives on "version control system".
 - `sv_line_count` is set to `-1` when line counting is skipped because the file-count gate already passed.
+

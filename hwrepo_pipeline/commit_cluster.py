@@ -1,62 +1,219 @@
-"""Commit clustering algorithm for grouping related commits."""
+"""Commit clustering algorithm for grouping related commits by author."""
 from __future__ import annotations
 
 import hashlib
 import logging
+from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
-from .diff_classifier import compute_file_overlap, extract_issue_refs
-from .models import CommitCluster, CommitInfo
+from .diff_classifier import (
+    classify_files,
+    compute_file_overlap,
+    extract_issue_refs,
+    merge_patches,
+)
+from .models import AuthorContribution, CommitInfo, FilePatch
 
 LOGGER = logging.getLogger(__name__)
 
 
 def parse_iso_datetime(dt_str: str) -> datetime:
     """Parse ISO 8601 datetime string."""
-    # Handle various ISO formats
     dt_str = dt_str.replace("Z", "+00:00")
     try:
         return datetime.fromisoformat(dt_str)
     except ValueError:
-        # Fallback for some edge cases
         return datetime.strptime(dt_str[:19], "%Y-%m-%dT%H:%M:%S")
 
 
-def generate_cluster_id(repo: str, commits: List[CommitInfo]) -> str:
-    """Generate a unique cluster ID based on repo and commit SHAs."""
-    sha_concat = "".join(c.sha[:8] for c in commits)
-    hash_input = f"{repo}:{sha_concat}".encode()
+def generate_contribution_id(repo: str, author: str, commits: List[CommitInfo]) -> str:
+    """Generate a unique contribution ID."""
+    sha_concat = "".join(c.sha[:8] for c in commits[:5])  # Use first 5 commits
+    hash_input = f"{repo}:{author}:{sha_concat}".encode()
     return hashlib.sha256(hash_input).hexdigest()[:12]
 
 
-def is_merge_commit(commit: CommitInfo) -> bool:
-    """Check if a commit is a merge commit (has multiple parents)."""
-    return len(commit.parents) > 1
+def group_commits_by_author(commits: List[CommitInfo]) -> Dict[str, List[CommitInfo]]:
+    """Group commits by author name."""
+    author_groups: Dict[str, List[CommitInfo]] = defaultdict(list)
+    for commit in commits:
+        author_groups[commit.author].append(commit)
+    return dict(author_groups)
 
 
+def cluster_author_commits_by_feature(
+    commits: List[CommitInfo],
+    time_window_days: int = 60,
+    file_overlap_threshold: float = 0.2,
+) -> List[List[CommitInfo]]:
+    """
+    Cluster an author's commits into feature groups.
+
+    Uses file path similarity and time proximity to group related commits.
+    A longer time window is used since feature development can span weeks.
+
+    Args:
+        commits: List of commits from a single author (chronologically sorted)
+        time_window_days: Max days between commits in same feature cluster
+        file_overlap_threshold: Min file overlap ratio to consider related
+
+    Returns:
+        List of commit groups (each group is a feature)
+    """
+    if not commits:
+        return []
+
+    # Sort by date
+    sorted_commits = sorted(commits, key=lambda c: c.authored_date)
+
+    clusters: List[List[CommitInfo]] = []
+    current_cluster: List[CommitInfo] = [sorted_commits[0]]
+    current_files: Set[str] = set(f.path for f in sorted_commits[0].files)
+    last_time = parse_iso_datetime(sorted_commits[0].authored_date)
+
+    for commit in sorted_commits[1:]:
+        commit_time = parse_iso_datetime(commit.authored_date)
+        commit_files = set(f.path for f in commit.files)
+
+        # Check if this commit belongs to current cluster
+        time_gap = (commit_time - last_time).days
+        file_overlap = compute_file_overlap(list(current_files), list(commit_files))
+
+        # Criteria for same feature:
+        # 1. Within time window AND has file overlap, OR
+        # 2. Very high file overlap (same files being modified)
+        same_feature = (
+            (time_gap <= time_window_days and file_overlap >= file_overlap_threshold)
+            or file_overlap >= 0.5  # High overlap = definitely same feature
+        )
+
+        if same_feature:
+            current_cluster.append(commit)
+            current_files.update(commit_files)
+            last_time = commit_time
+        else:
+            # Start new cluster
+            if current_cluster:
+                clusters.append(current_cluster)
+            current_cluster = [commit]
+            current_files = commit_files
+            last_time = commit_time
+
+    # Don't forget the last cluster
+    if current_cluster:
+        clusters.append(current_cluster)
+
+    return clusters
+
+
+def collect_author_contributions(
+    repo: str,
+    commits: List[CommitInfo],
+    time_window_days: int = 60,
+    min_commits: int = 2,
+) -> List[AuthorContribution]:
+    """
+    Collect contributions from all authors in the repository.
+
+    This groups commits by author, then by feature within each author,
+    and collects/merges patches from each contribution.
+
+    Args:
+        repo: Repository name (owner/repo)
+        commits: List of all commits
+        time_window_days: Max days between commits in same feature
+        min_commits: Minimum commits required for a contribution
+
+    Returns:
+        List of AuthorContribution objects
+    """
+    contributions: List[AuthorContribution] = []
+
+    # Group by author
+    author_groups = group_commits_by_author(commits)
+
+    for author, author_commits in author_groups.items():
+        # Cluster by feature within this author's commits
+        feature_clusters = cluster_author_commits_by_feature(
+            author_commits,
+            time_window_days=time_window_days,
+        )
+
+        for cluster in feature_clusters:
+            if len(cluster) < min_commits:
+                continue
+
+            # Sort chronologically
+            cluster.sort(key=lambda c: c.authored_date)
+
+            # Collect all patches from this cluster
+            all_patches: List[List[FilePatch]] = []
+            commit_shas: List[str] = []
+            commit_messages: List[str] = []
+
+            for commit in cluster:
+                commit_shas.append(commit.sha)
+                commit_messages.append(commit.message.split("\n")[0][:100])
+                all_patches.append(commit.files)
+
+            # Merge patches
+            code_patches, test_patches = merge_patches(all_patches)
+
+            # Only include if has both code and test patches
+            if not code_patches or not test_patches:
+                continue
+
+            contribution = AuthorContribution(
+                repo=repo,
+                author=author,
+                contribution_id=generate_contribution_id(repo, author, cluster),
+                commits=commit_shas,
+                first_commit_date=cluster[0].authored_date,
+                last_commit_date=cluster[-1].authored_date,
+                code_patches=code_patches,
+                test_patches=test_patches,
+                commit_messages=commit_messages,
+                validation_status="pending",
+            )
+            contributions.append(contribution)
+
+    return contributions
+
+
+def get_pr_covered_shas(prs: List[dict]) -> Set[str]:
+    """
+    Get all commit SHAs that are covered by merged PRs.
+
+    Args:
+        prs: List of PR info dicts
+
+    Returns:
+        Set of covered commit SHAs
+    """
+    covered: Set[str] = set()
+
+    for pr in prs:
+        merge_sha = pr.get("merge_commit_sha") or pr.get("mergeCommit", {}).get("oid")
+        if merge_sha:
+            covered.add(merge_sha)
+
+    return covered
+
+
+# Keep old function for backward compatibility
 def cluster_commits(
     repo: str,
     commits: List[CommitInfo],
     time_window_hours: int = 24,
     file_overlap_threshold: float = 0.3,
     covered_shas: Optional[Set[str]] = None,
-) -> List[CommitCluster]:
+) -> List[AuthorContribution]:
     """
-    Cluster commits using multiple strategies:
-    1. Merge boundary: merge commits act as cluster separators
-    2. Issue link: commits referencing the same issue are grouped
-    3. Time + Author + File: same author within time window with file overlap
+    Cluster commits by author and feature.
 
-    Args:
-        repo: Repository name (owner/repo)
-        commits: List of commits in chronological order (oldest first)
-        time_window_hours: Max hours between commits in same cluster
-        file_overlap_threshold: Min file overlap ratio (0-1)
-        covered_shas: Set of commit SHAs already covered by PRs (to exclude)
-
-    Returns:
-        List of CommitCluster objects
+    This is the main entry point for commit clustering.
+    Now returns AuthorContribution instead of CommitCluster.
     """
     if covered_shas is None:
         covered_shas = set()
@@ -66,155 +223,12 @@ def cluster_commits(
     if not uncovered:
         return []
 
-    clusters: List[CommitCluster] = []
+    # Convert hours to days for the new algorithm
+    time_window_days = max(1, time_window_hours // 24) if time_window_hours < 24 * 60 else 60
 
-    # Group by issue reference first
-    issue_groups: Dict[str, List[CommitInfo]] = {}
-    no_issue_commits: List[CommitInfo] = []
-
-    for commit in uncovered:
-        refs = extract_issue_refs(commit.message)
-        if refs:
-            # Use the first issue ref as the group key
-            key = refs[0]
-            if key not in issue_groups:
-                issue_groups[key] = []
-            issue_groups[key].append(commit)
-        else:
-            no_issue_commits.append(commit)
-
-    # Create clusters from issue groups
-    for issue_ref, issue_commits in issue_groups.items():
-        if len(issue_commits) < 1:
-            continue
-
-        # Sort by date
-        issue_commits.sort(key=lambda c: c.authored_date)
-
-        # Find base_sha (parent of first commit)
-        base_sha = ""
-        if issue_commits[0].parents:
-            base_sha = issue_commits[0].parents[0]
-
-        cluster = CommitCluster(
-            cluster_id=generate_cluster_id(repo, issue_commits),
-            repo=repo,
-            commits=issue_commits,
-            base_sha=base_sha,
-            target_sha=issue_commits[-1].sha,
-            issue_refs=[issue_ref],
-        )
-        clusters.append(cluster)
-
-    # Cluster remaining commits by time/author/file overlap
-    if no_issue_commits:
-        # Sort by date
-        no_issue_commits.sort(key=lambda c: c.authored_date)
-
-        current_cluster: List[CommitInfo] = []
-        current_author: Optional[str] = None
-        current_files: List[str] = []
-        last_time: Optional[datetime] = None
-
-        for commit in no_issue_commits:
-            # Merge commits act as cluster boundaries
-            if is_merge_commit(commit):
-                if current_cluster:
-                    clusters.append(_make_cluster(repo, current_cluster))
-                current_cluster = []
-                current_author = None
-                current_files = []
-                last_time = None
-                continue
-
-            commit_time = parse_iso_datetime(commit.authored_date)
-            commit_files = [f.path for f in commit.files]
-
-            should_start_new = False
-
-            if not current_cluster:
-                should_start_new = False  # First commit, start cluster
-            elif current_author != commit.author:
-                should_start_new = True
-            elif last_time and (commit_time - last_time) > timedelta(hours=time_window_hours):
-                should_start_new = True
-            elif current_files and commit_files:
-                overlap = compute_file_overlap(current_files, commit_files)
-                if overlap < file_overlap_threshold:
-                    should_start_new = True
-
-            if should_start_new and current_cluster:
-                clusters.append(_make_cluster(repo, current_cluster))
-                current_cluster = []
-                current_files = []
-
-            current_cluster.append(commit)
-            current_author = commit.author
-            current_files.extend(commit_files)
-            last_time = commit_time
-
-        # Don't forget the last cluster
-        if current_cluster:
-            clusters.append(_make_cluster(repo, current_cluster))
-
-    return clusters
-
-
-def _make_cluster(repo: str, commits: List[CommitInfo]) -> CommitCluster:
-    """Create a CommitCluster from a list of commits."""
-    # Find base_sha (parent of first commit)
-    base_sha = ""
-    if commits and commits[0].parents:
-        base_sha = commits[0].parents[0]
-
-    # Collect all issue refs
-    all_refs: List[str] = []
-    for c in commits:
-        all_refs.extend(extract_issue_refs(c.message))
-
-    return CommitCluster(
-        cluster_id=generate_cluster_id(repo, commits),
+    return collect_author_contributions(
         repo=repo,
-        commits=commits,
-        base_sha=base_sha,
-        target_sha=commits[-1].sha if commits else "",
-        issue_refs=list(set(all_refs)),
+        commits=uncovered,
+        time_window_days=time_window_days,
+        min_commits=1,  # Allow single commits if they have code+test
     )
-
-
-def get_pr_covered_shas(
-    prs: List[dict],
-    get_commits_between: callable = None,
-) -> Set[str]:
-    """
-    Get all commit SHAs that are covered by merged PRs.
-
-    This is used to exclude commits that are already part of PRs
-    from the clustering process.
-
-    Args:
-        prs: List of PR info dicts with 'base_sha' and 'merge_commit_sha'
-        get_commits_between: Optional function to get commits between two SHAs
-
-    Returns:
-        Set of covered commit SHAs
-    """
-    covered: Set[str] = set()
-
-    for pr in prs:
-        # At minimum, add the merge commit
-        merge_sha = pr.get("merge_commit_sha") or pr.get("mergeCommit", {}).get("oid")
-        if merge_sha:
-            covered.add(merge_sha)
-
-        # If we have a way to get commits between base and merge,
-        # add all of those too
-        base_sha = pr.get("base_sha") or pr.get("baseRefOid")
-        if base_sha and merge_sha and get_commits_between:
-            try:
-                between = get_commits_between(base_sha, merge_sha)
-                covered.update(between)
-            except Exception:
-                pass
-
-    return covered

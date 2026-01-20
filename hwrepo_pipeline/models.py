@@ -107,3 +107,23 @@ class MinerRejectRecord:
     source_type: str
     source_id: str
     reasons: List[str]
+
+
+@dataclass
+class AuthorContribution:
+    """
+    A collection of patches from a single author working on a feature.
+
+    Unlike CommitPair which has base_sha/target_sha, this model collects
+    all patches from an author regardless of interleaved commits from others.
+    """
+    repo: str
+    author: str
+    contribution_id: str  # unique identifier
+    commits: List[str]  # list of commit SHAs involved
+    first_commit_date: str
+    last_commit_date: str
+    code_patches: List[FilePatch] = field(default_factory=list)
+    test_patches: List[FilePatch] = field(default_factory=list)
+    commit_messages: List[str] = field(default_factory=list)
+    validation_status: str = "pending"  # "pending" | "valid" | "invalid"

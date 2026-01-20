@@ -12,35 +12,35 @@ from .models import FilePatch
 VERILOG_EXTENSIONS = {".v", ".vh", ".sv", ".svh"}
 
 # Test file patterns (filename-based)
+# Focus on explicit testbench naming conventions
 TEST_FILE_PATTERNS = [
-    "*tb*.sv",
-    "*tb*.v",
-    "*test*.sv",
-    "*test*.v",
-    "*_tb.sv",
-    "*_tb.v",
-    "tb_*.sv",
-    "tb_*.v",
-    "*_test.sv",
-    "*_test.v",
-    "test_*.sv",
-    "test_*.v",
+    "*_tb.sv",      # module_tb.sv (most common)
+    "*_tb.v",       # module_tb.v
+    "tb_*.sv",      # tb_module.sv
+    "tb_*.v",       # tb_module.v
+    "*_test.sv",    # module_test.sv
+    "*_test.v",     # module_test.v
+    "*_tb_*.sv",    # module_tb_top.sv
+    "*_tb_*.v",     # module_tb_top.v
     "*testbench*.sv",
     "*testbench*.v",
 ]
 
 # Test directory patterns
+# NOTE: Excluded 'sim', 'simulation' - these often contain simulation
+# platform/infrastructure code, not actual testbenches
 TEST_DIR_PATTERNS = [
     "tb",
     "test",
     "tests",
     "testbench",
     "testbenches",
-    "sim",
-    "simulation",
     "verif",
     "verification",
     "bench",
+    "dv",           # design verification
+    "uvm",          # UVM testbenches
+    "cocotb",       # cocotb tests
 ]
 
 
@@ -197,3 +197,51 @@ def compute_file_overlap(files1: List[str], files2: List[str]) -> float:
     union = len(set1 | set2)
 
     return intersection / union if union > 0 else 0.0
+
+
+def merge_patches(patches_list: List[List[FilePatch]]) -> Tuple[List[FilePatch], List[FilePatch]]:
+    """
+    Merge patches from multiple commits into unified code and test patches.
+
+    For each file, we keep the latest patch (by order in the list).
+    This assumes patches_list is ordered chronologically.
+
+    Args:
+        patches_list: List of (code_patches, test_patches) tuples from multiple commits
+
+    Returns:
+        Tuple of (merged_code_patches, merged_test_patches)
+    """
+    # Track latest patch for each file path
+    code_by_path: dict[str, FilePatch] = {}
+    test_by_path: dict[str, FilePatch] = {}
+
+    for patches in patches_list:
+        for patch in patches:
+            if patch.patch_type == "code":
+                if patch.path in code_by_path:
+                    # Merge: accumulate additions/deletions, keep latest patch content
+                    existing = code_by_path[patch.path]
+                    code_by_path[patch.path] = FilePatch(
+                        path=patch.path,
+                        patch_type="code",
+                        additions=existing.additions + patch.additions,
+                        deletions=existing.deletions + patch.deletions,
+                        patch=patch.patch,  # keep latest
+                    )
+                else:
+                    code_by_path[patch.path] = patch
+            elif patch.patch_type == "test":
+                if patch.path in test_by_path:
+                    existing = test_by_path[patch.path]
+                    test_by_path[patch.path] = FilePatch(
+                        path=patch.path,
+                        patch_type="test",
+                        additions=existing.additions + patch.additions,
+                        deletions=existing.deletions + patch.deletions,
+                        patch=patch.patch,
+                    )
+                else:
+                    test_by_path[patch.path] = patch
+
+    return list(code_by_path.values()), list(test_by_path.values())

@@ -105,7 +105,7 @@ class MinerConfig:
     """Configuration for the commit miner."""
 
     # Lookback period
-    lookback_days: int = 365
+    lookback_days: int = 1825  # 5 years
 
     # PR mining limits
     max_prs_per_repo: int = 500
@@ -113,9 +113,13 @@ class MinerConfig:
     # Commit mining limits
     max_commits_per_repo: int = 1000
 
-    # Clustering parameters
-    cluster_time_window_hours: int = 24
+    # Author contribution mining parameters
     enable_cluster_mining: bool = True
+    author_time_window_days: int = 60  # Max days between commits in same feature
+    min_commits_per_contribution: int = 1  # Min commits to form a contribution
+
+    # Legacy parameter (kept for backward compatibility)
+    cluster_time_window_hours: int = 24
 
     # Minimum change thresholds
     min_code_changes: int = 5

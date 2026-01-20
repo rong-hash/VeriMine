@@ -31,6 +31,11 @@ def main() -> None:
         help="Output JSONL path for rejected candidates",
     )
     parser.add_argument(
+        "--contributions",
+        default="output/author_contributions.jsonl",
+        help="Output JSONL path for author contributions",
+    )
+    parser.add_argument(
         "--progress",
         default=None,
         help="Progress file for resumption (optional)",
@@ -122,6 +127,9 @@ def main() -> None:
     rejects_path = Path(args.rejects)
     rejects_path.parent.mkdir(parents=True, exist_ok=True)
 
+    contributions_path = Path(args.contributions)
+    contributions_path.parent.mkdir(parents=True, exist_ok=True)
+
     progress_path = Path(args.progress) if args.progress else None
 
     # Run the miner
@@ -131,6 +139,7 @@ def main() -> None:
         input_path=Path(args.input),
         output_path=output_path,
         rejects_path=rejects_path,
+        contributions_path=contributions_path,
         progress_path=progress_path,
     )
 

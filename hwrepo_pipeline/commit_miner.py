@@ -1,4 +1,4 @@
-"""Core commit mining logic for extracting (base_commit, target_commit) pairs."""
+"""Core commit mining logic for extracting commit pairs and author contributions."""
 from __future__ import annotations
 
 import json
@@ -6,44 +6,45 @@ import logging
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from .commit_cluster import cluster_commits, get_pr_covered_shas
+from .commit_cluster import collect_author_contributions, get_pr_covered_shas
 from .config import MinerConfig
 from .diff_classifier import classify_files, has_valid_patches
 from .github_client import GitHubClient
 from .models import (
-    CommitCluster,
+    AuthorContribution,
     CommitInfo,
     CommitPair,
     FilePatch,
     MinerRejectRecord,
-    PRInfo,
-    RepoCard,
 )
 
 LOGGER = logging.getLogger(__name__)
 
 
 class CommitMiner:
-    """Mines commit pairs from repositories."""
+    """Mines commit pairs and author contributions from repositories."""
 
     def __init__(self, client: GitHubClient, config: MinerConfig):
         self.client = client
         self.config = config
 
-    def mine_repo(self, repo: str) -> tuple[List[CommitPair], List[MinerRejectRecord]]:
+    def mine_repo(
+        self, repo: str
+    ) -> Tuple[List[CommitPair], List[AuthorContribution], List[MinerRejectRecord]]:
         """
-        Mine commit pairs from a single repository.
+        Mine commit pairs and author contributions from a single repository.
 
         Args:
             repo: Repository name in 'owner/repo' format
 
         Returns:
-            Tuple of (valid_pairs, rejected_records)
+            Tuple of (commit_pairs, author_contributions, rejected_records)
         """
         owner, repo_name = repo.split("/")
         pairs: List[CommitPair] = []
+        contributions: List[AuthorContribution] = []
         rejects: List[MinerRejectRecord] = []
 
         # Calculate lookback date
@@ -53,7 +54,7 @@ class CommitMiner:
 
         LOGGER.info("Mining repo %s (since %s)", repo, since_date[:10])
 
-        # Phase 1: Mine from PRs
+        # Phase 1: Mine from PRs (produces CommitPair)
         pr_pairs, pr_rejects, covered_shas = self._mine_prs(
             owner, repo_name, since_date
         )
@@ -65,24 +66,24 @@ class CommitMiner:
             len(pr_pairs), len(pr_rejects), len(covered_shas)
         )
 
-        # Phase 2: Mine from commit clusters (excluding PR-covered commits)
+        # Phase 2: Mine from author contributions (produces AuthorContribution)
         if self.config.enable_cluster_mining:
-            cluster_pairs, cluster_rejects = self._mine_clusters(
+            author_contribs, contrib_rejects = self._mine_author_contributions(
                 owner, repo_name, since_date, covered_shas
             )
-            pairs.extend(cluster_pairs)
-            rejects.extend(cluster_rejects)
+            contributions.extend(author_contribs)
+            rejects.extend(contrib_rejects)
 
             LOGGER.info(
-                "Cluster mining: %d pairs, %d rejects",
-                len(cluster_pairs), len(cluster_rejects)
+                "Author contribution mining: %d contributions, %d rejects",
+                len(author_contribs), len(contrib_rejects)
             )
 
-        return pairs, rejects
+        return pairs, contributions, rejects
 
     def _mine_prs(
         self, owner: str, repo_name: str, since: str
-    ) -> tuple[List[CommitPair], List[MinerRejectRecord], Set[str]]:
+    ) -> Tuple[List[CommitPair], List[MinerRejectRecord], Set[str]]:
         """Mine commit pairs from merged PRs."""
         pairs: List[CommitPair] = []
         rejects: List[MinerRejectRecord] = []
@@ -125,9 +126,7 @@ class CommitMiner:
 
             # Get files for this PR
             if self.config.use_graphql:
-                # GraphQL response includes files
                 files = pr.get("files", {}).get("nodes", [])
-                # Convert GraphQL format to REST format
                 files = [
                     {"filename": f["path"], "additions": f["additions"], "deletions": f["deletions"]}
                     for f in files if f
@@ -185,15 +184,15 @@ class CommitMiner:
 
         return pairs, rejects, covered_shas
 
-    def _mine_clusters(
+    def _mine_author_contributions(
         self,
         owner: str,
         repo_name: str,
         since: str,
         covered_shas: Set[str],
-    ) -> tuple[List[CommitPair], List[MinerRejectRecord]]:
-        """Mine commit pairs from commit clusters."""
-        pairs: List[CommitPair] = []
+    ) -> Tuple[List[AuthorContribution], List[MinerRejectRecord]]:
+        """Mine author contributions by collecting patches from each author."""
+        contributions: List[AuthorContribution] = []
         rejects: List[MinerRejectRecord] = []
         repo = f"{owner}/{repo_name}"
 
@@ -206,7 +205,7 @@ class CommitMiner:
 
         LOGGER.debug("Fetched %d commits", len(raw_commits))
 
-        # Convert to CommitInfo objects
+        # Convert to CommitInfo objects and fetch files for each
         commits: List[CommitInfo] = []
         for c in raw_commits:
             sha = c.get("sha", "")
@@ -216,105 +215,59 @@ class CommitMiner:
             commit_data = c.get("commit", {})
             author = commit_data.get("author", {})
 
+            # Fetch files for this commit
+            commit_files = self.client.get_commit_files(owner, repo_name, sha)
+            code_patches, test_patches, _ = classify_files(commit_files)
+            all_patches = code_patches + test_patches
+
             commits.append(CommitInfo(
                 sha=sha,
                 message=commit_data.get("message", ""),
                 author=author.get("name", ""),
                 authored_date=author.get("date", ""),
                 parents=[p.get("sha", "") for p in c.get("parents", [])],
-                files=[],  # Files will be fetched if needed
+                files=all_patches,
             ))
 
         if not commits:
-            return pairs, rejects
+            return contributions, rejects
 
-        # Cluster commits
-        clusters = cluster_commits(
+        # Collect author contributions
+        author_contribs = collect_author_contributions(
             repo=repo,
             commits=commits,
-            time_window_hours=self.config.cluster_time_window_hours,
-            file_overlap_threshold=0.3,
-            covered_shas=covered_shas,
+            time_window_days=self.config.author_time_window_days,
+            min_commits=self.config.min_commits_per_contribution,
         )
 
-        LOGGER.debug("Created %d clusters", len(clusters))
+        LOGGER.debug("Found %d author contributions", len(author_contribs))
 
-        # Process each cluster
-        for cluster in clusters:
-            if not cluster.base_sha or not cluster.target_sha:
+        # Filter contributions that meet minimum thresholds
+        for contrib in author_contribs:
+            code_changes = sum(p.additions + p.deletions for p in contrib.code_patches)
+            test_changes = sum(p.additions + p.deletions for p in contrib.test_patches)
+
+            if code_changes < self.config.min_code_changes:
                 rejects.append(MinerRejectRecord(
                     repo=repo,
-                    source_type="cluster",
-                    source_id=cluster.cluster_id,
-                    reasons=["missing base_sha or target_sha"],
+                    source_type="author",
+                    source_id=f"{contrib.author}:{contrib.contribution_id}",
+                    reasons=[f"insufficient code changes ({code_changes} < {self.config.min_code_changes})"],
                 ))
                 continue
 
-            # Get diff between base and target
-            compare_result = self.client.compare_commits(
-                owner, repo_name, cluster.base_sha, cluster.target_sha
-            )
-
-            if not compare_result:
+            if test_changes < self.config.min_test_changes:
                 rejects.append(MinerRejectRecord(
                     repo=repo,
-                    source_type="cluster",
-                    source_id=cluster.cluster_id,
-                    reasons=["failed to compare commits"],
+                    source_type="author",
+                    source_id=f"{contrib.author}:{contrib.contribution_id}",
+                    reasons=[f"insufficient test changes ({test_changes} < {self.config.min_test_changes})"],
                 ))
                 continue
 
-            files = compare_result.get("files", [])
+            contributions.append(contrib)
 
-            # Quick filter
-            if not has_valid_patches(
-                files,
-                min_code=self.config.min_code_changes,
-                min_test=self.config.min_test_changes,
-            ):
-                rejects.append(MinerRejectRecord(
-                    repo=repo,
-                    source_type="cluster",
-                    source_id=cluster.cluster_id,
-                    reasons=["insufficient code or test changes"],
-                ))
-                continue
-
-            # Classify files
-            code_patches, test_patches, _ = classify_files(files)
-
-            if not code_patches:
-                rejects.append(MinerRejectRecord(
-                    repo=repo,
-                    source_type="cluster",
-                    source_id=cluster.cluster_id,
-                    reasons=["no Verilog/SV code changes"],
-                ))
-                continue
-
-            if not test_patches:
-                rejects.append(MinerRejectRecord(
-                    repo=repo,
-                    source_type="cluster",
-                    source_id=cluster.cluster_id,
-                    reasons=["no test file changes"],
-                ))
-                continue
-
-            # Create commit pair
-            pair = CommitPair(
-                repo=repo,
-                base_sha=cluster.base_sha,
-                target_sha=cluster.target_sha,
-                source_type="cluster",
-                source_id=cluster.cluster_id,
-                code_patches=code_patches,
-                test_patches=test_patches,
-                validation_status="pending",
-            )
-            pairs.append(pair)
-
-        return pairs, rejects
+        return contributions, rejects
 
 
 def run_miner(
@@ -323,6 +276,7 @@ def run_miner(
     input_path: Path,
     output_path: Path,
     rejects_path: Path,
+    contributions_path: Optional[Path] = None,
     progress_path: Optional[Path] = None,
 ) -> None:
     """
@@ -332,11 +286,16 @@ def run_miner(
         client: GitHub API client
         config: Miner configuration
         input_path: Path to repo_cards.jsonl
-        output_path: Path to write commit_pairs.jsonl
+        output_path: Path to write commit_pairs.jsonl (from PRs)
         rejects_path: Path to write miner_rejects.jsonl
+        contributions_path: Path to write author_contributions.jsonl (optional)
         progress_path: Optional path to track progress for resumption
     """
     miner = CommitMiner(client, config)
+
+    # Default contributions path
+    if contributions_path is None:
+        contributions_path = output_path.parent / "author_contributions.jsonl"
 
     # Load progress if resuming
     processed_repos: Set[str] = set()
@@ -349,7 +308,8 @@ def run_miner(
     # Open output files in append mode if resuming
     mode = "a" if processed_repos else "w"
 
-    with open(output_path, mode) as out_f, \
+    with open(output_path, mode) as pairs_f, \
+         open(contributions_path, mode) as contribs_f, \
          open(rejects_path, mode) as rej_f, \
          open(input_path, "r") as in_f:
 
@@ -371,22 +331,28 @@ def run_miner(
                 continue
 
             try:
-                pairs, rejects = miner.mine_repo(repo)
+                pairs, contributions, rejects = miner.mine_repo(repo)
 
-                # Write results
+                # Write commit pairs (from PRs)
                 for pair in pairs:
-                    out_f.write(json.dumps(asdict(pair)) + "\n")
+                    pairs_f.write(json.dumps(asdict(pair)) + "\n")
 
+                # Write author contributions
+                for contrib in contributions:
+                    contribs_f.write(json.dumps(asdict(contrib)) + "\n")
+
+                # Write rejects
                 for reject in rejects:
                     rej_f.write(json.dumps(asdict(reject)) + "\n")
 
                 # Flush to ensure data is written
-                out_f.flush()
+                pairs_f.flush()
+                contribs_f.flush()
                 rej_f.flush()
 
                 LOGGER.info(
-                    "Processed %s: %d pairs, %d rejects",
-                    repo, len(pairs), len(rejects)
+                    "Processed %s: %d pairs, %d contributions, %d rejects",
+                    repo, len(pairs), len(contributions), len(rejects)
                 )
 
                 # Update progress
@@ -396,7 +362,6 @@ def run_miner(
 
             except Exception as e:
                 LOGGER.error("Error processing %s: %s", repo, e)
-                # Write a reject record for the error
                 error_reject = MinerRejectRecord(
                     repo=repo,
                     source_type="repo",
@@ -406,4 +371,6 @@ def run_miner(
                 rej_f.write(json.dumps(asdict(error_reject)) + "\n")
                 rej_f.flush()
 
-    LOGGER.info("Mining complete. Output: %s", output_path)
+    LOGGER.info("Mining complete.")
+    LOGGER.info("  Commit pairs: %s", output_path)
+    LOGGER.info("  Author contributions: %s", contributions_path)

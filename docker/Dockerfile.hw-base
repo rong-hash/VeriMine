@@ -1,0 +1,70 @@
+# Base image for hardware verification
+# Contains: verilator, iverilog, yosys, sv2v, cocotb
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Basic build tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    curl \
+    wget \
+    python3 \
+    python3-pip \
+    python3-venv \
+    cmake \
+    ninja-build \
+    autoconf \
+    automake \
+    libtool \
+    flex \
+    bison \
+    pkg-config \
+    libfl-dev \
+    zlib1g-dev \
+    libreadline-dev \
+    tcl-dev \
+    libffi-dev \
+    clang \
+    llvm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Icarus Verilog
+RUN apt-get update && apt-get install -y iverilog && rm -rf /var/lib/apt/lists/*
+
+# Install Verilator (from apt, version ~4.038)
+# For newer version, build from source below
+RUN apt-get update && apt-get install -y verilator && rm -rf /var/lib/apt/lists/*
+
+# Install Yosys
+RUN apt-get update && apt-get install -y yosys && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages for verification
+RUN pip3 install --no-cache-dir \
+    cocotb \
+    cocotb-bus \
+    pytest \
+    pyverilog
+
+# Install sv2v (SystemVerilog to Verilog converter)
+# Pre-built binary from GitHub releases
+RUN curl -L https://github.com/zachjs/sv2v/releases/download/v0.0.12/sv2v-Linux.zip -o /tmp/sv2v.zip \
+    && unzip /tmp/sv2v.zip -d /usr/local/bin/ \
+    && chmod +x /usr/local/bin/sv2v \
+    && rm /tmp/sv2v.zip
+
+# Create workspace
+WORKDIR /workspace
+
+# Verify installations
+RUN echo "=== Tool Versions ===" && \
+    verilator --version && \
+    iverilog -V 2>&1 | head -1 && \
+    yosys --version && \
+    sv2v --version && \
+    cocotb-config --version
+
+CMD ["/bin/bash"]

@@ -51,20 +51,16 @@ def is_verilog_file(path: str) -> bool:
 
 
 def is_test_file(path: str) -> bool:
-    """Check if a file is a test file based on name and path patterns."""
-    p = PurePosixPath(path)
-    filename = p.name.lower()
+    """Check if a file is a test file based on path containing 'test' or 'tb'."""
+    path_lower = path.lower()
 
-    # Check filename patterns
-    for pattern in TEST_FILE_PATTERNS:
-        if fnmatch.fnmatch(filename, pattern):
-            return True
+    # Simple rule: path contains 'test' or 'tb'
+    if 'test' in path_lower or '/tb/' in path_lower or '/tb_' in path_lower or '_tb/' in path_lower or '_tb.' in path_lower:
+        return True
 
-    # Check directory patterns
-    parts = [part.lower() for part in p.parts[:-1]]
-    for part in parts:
-        if part in TEST_DIR_PATTERNS:
-            return True
+    # Also check for common verification directories
+    if '/verif/' in path_lower or '/dv/' in path_lower or '/uvm/' in path_lower:
+        return True
 
     return False
 
@@ -74,17 +70,19 @@ def classify_file(path: str) -> str:
     Classify a file as 'code', 'test', or 'other'.
 
     Returns:
-        'test' - Verilog/SV test file
+        'test' - Any file in test/tb path (any file type)
         'code' - Verilog/SV source file (non-test)
-        'other' - Non-Verilog file
+        'other' - Non-Verilog, non-test file
     """
-    if not is_verilog_file(path):
-        return "other"
-
+    # First check if it's a test file (any file type)
     if is_test_file(path):
         return "test"
 
-    return "code"
+    # Then check if it's Verilog code
+    if is_verilog_file(path):
+        return "code"
+
+    return "other"
 
 
 def classify_files(

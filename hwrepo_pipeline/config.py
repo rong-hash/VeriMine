@@ -105,7 +105,7 @@ class MinerConfig:
     """Configuration for the commit miner."""
 
     # Lookback period
-    lookback_days: int = 1825  # 5 years
+    lookback_days: int = 1095  # 3 years
 
     # PR mining limits
     max_prs_per_repo: int = 500

@@ -45,18 +45,18 @@ def group_commits_by_author(commits: List[CommitInfo]) -> Dict[str, List[CommitI
 def cluster_author_commits_by_feature(
     commits: List[CommitInfo],
     time_window_days: int = 60,
-    file_overlap_threshold: float = 0.2,
+    file_overlap_threshold: float = 0.0,  # Disabled by default
 ) -> List[List[CommitInfo]]:
     """
     Cluster an author's commits into feature groups.
 
-    Uses file path similarity and time proximity to group related commits.
-    A longer time window is used since feature development can span weeks.
+    Uses time proximity only to group related commits.
+    Commits within the time window are grouped together.
 
     Args:
         commits: List of commits from a single author (chronologically sorted)
         time_window_days: Max days between commits in same feature cluster
-        file_overlap_threshold: Min file overlap ratio to consider related
+        file_overlap_threshold: Deprecated, kept for backward compatibility
 
     Returns:
         List of commit groups (each group is a feature)
@@ -69,35 +69,23 @@ def cluster_author_commits_by_feature(
 
     clusters: List[List[CommitInfo]] = []
     current_cluster: List[CommitInfo] = [sorted_commits[0]]
-    current_files: Set[str] = set(f.path for f in sorted_commits[0].files)
     last_time = parse_iso_datetime(sorted_commits[0].authored_date)
 
     for commit in sorted_commits[1:]:
         commit_time = parse_iso_datetime(commit.authored_date)
-        commit_files = set(f.path for f in commit.files)
 
-        # Check if this commit belongs to current cluster
+        # Check if this commit belongs to current cluster (time-based only)
         time_gap = (commit_time - last_time).days
-        file_overlap = compute_file_overlap(list(current_files), list(commit_files))
 
-        # Criteria for same feature:
-        # 1. Within time window AND has file overlap, OR
-        # 2. Very high file overlap (same files being modified)
-        same_feature = (
-            (time_gap <= time_window_days and file_overlap >= file_overlap_threshold)
-            or file_overlap >= 0.5  # High overlap = definitely same feature
-        )
-
-        if same_feature:
+        if time_gap <= time_window_days:
+            # Within time window, same cluster
             current_cluster.append(commit)
-            current_files.update(commit_files)
             last_time = commit_time
         else:
             # Start new cluster
             if current_cluster:
                 clusters.append(current_cluster)
             current_cluster = [commit]
-            current_files = commit_files
             last_time = commit_time
 
     # Don't forget the last cluster

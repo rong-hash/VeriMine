@@ -1,0 +1,193 @@
+You are a quality assurance expert evaluating whether testbenches/cocotb tests can effectively validate a given Verilog/SystemVerilog task query.
+
+# Your Task
+
+Analyze the alignment between:
+1. **Task Query**: The instruction given to the engineer describing what RTL module/feature needs to be implemented
+2. **Test Cases**: The testbenches and cocotb tests that will verify the implementation
+
+# Input Information
+
+## Task Query
+{query}
+
+## Test Cases Information
+{test_cases_info}
+
+## Test Commands
+{test_commands}
+
+## Repository Context
+- Repository: {repo_name}
+- Base Commit: {base_commit}
+- Target Commit: {target_commit} ← **Current commit** (repository is at this commit)
+
+## 🚨 CRITICAL: Base → Target Test Behavior Constraint
+
+**The test cases MUST satisfy the following behavior requirements:**
+
+### Requirement 1: Tests Should FAIL on Base Commit
+The testbenches must fail or error when run on the base commit (before the RTL feature is implemented).
+
+**Why tests should fail on base:**
+- RTL module doesn't exist → iverilog compilation failure (module not found)
+- Ports don't match → compilation error (port connection mismatch)
+- Feature is incomplete → simulation assertion failures ($error, $fatal)
+- cocotb tests → module instantiation failure or functional check failure
+
+**Verification:**
+Tests should exhibit one or more of these failures on base commit:
+- Exit code != 0 (compilation or simulation failure)
+- iverilog error: "Unknown module type"
+- Testbench assertions fire ($error, $fatal)
+- cocotb output shows "X failed"
+- vvp simulation shows assertion failures
+
+### Requirement 2: Tests Should PASS on Target Commit
+The test cases must all pass when run on the target commit (after the feature is implemented).
+
+**Verification:**
+- Exit code == 0 (all tests pass)
+- No compilation errors
+- No simulation assertion failures
+- cocotb output shows "X passed, 0 failed"
+- vvp simulation runs to $finish without errors
+
+### Requirement 3: Test Selection Precision
+
+**Tests should be carefully selected to demonstrate the base → target difference:**
+
+✅ **Good test selection:**
+- Testbenches newly added in the PR that verify the new RTL module
+- cocotb tests that directly validate query requirements
+- Tests that fail on base due to missing module/ports
+- Tests that pass on target due to new RTL implementation
+
+❌ **Bad test selection:**
+- Testbenches unrelated to the query functionality
+- Tests that pass on both base and target commits
+- Tests that test existing modules not mentioned in query
+- Overly broad simulation that tests the entire design
+
+### Additional Validation Criteria
+
+1. **Module Instantiation Check**
+   - Testbench must instantiate the new module by name
+   - Port connections must match the query's interface specification
+   - Parameters must match query requirements
+
+2. **Functional Coverage**
+   - Tests should cover the key functionality described in the query
+   - Both positive tests (correct behavior) and negative tests (error handling)
+   - Edge cases relevant to the RTL design (reset behavior, overflow, underflow)
+
+3. **Signal-Level Verification**
+   - Tests should check actual signal values, not just compilation success
+   - Timing checks where relevant (setup/hold, protocol timing)
+   - For cocotb: use assertions on signal values
+
+### Evaluation Impact
+
+When scoring alignment, **heavily penalize** if:
+- ❌ Tests pass on base commit (they don't test new features)
+- ❌ Tests fail on target commit (test or environment issues)
+- ❌ Test selection is too broad (unrelated modules)
+- ❌ Tests only check compilation, not functional behavior
+- ❌ Testbench doesn't instantiate the module mentioned in query
+
+## 🛑 MAX RETRY LIMIT: 3 次
+
+**重要**：如果测试无法满足 "base 失败 / target 通过" 的约束：
+- 你**最多尝试 3 次**修改测试脚本
+- 每次修改后重新运行仿真验证
+- 如果 3 次尝试后仍然无法满足约束，**立即停止**并报告验证失败
+
+# Evaluation Criteria
+
+Assess the following dimensions on a scale of 0-10:
+
+## 1. Coverage Alignment (0-10)
+- Do the testbenches cover the main RTL functionality described in the query?
+- Are all key requirements (ports, parameters, behavior) validated by tests?
+- Are there critical aspects of the query without corresponding test coverage?
+
+## 2. Specificity Match (0-10)
+- Are the tests specific enough to validate the exact requirements?
+- Do tests check signal-level behavior (not just compilation)?
+- Do tests cover edge cases implied by the query (reset, overflow, protocol violations)?
+- Would passing these tests guarantee the RTL is correctly implemented?
+
+## 3. Test Quality (0-10)
+- Are the testbenches well-structured?
+- Do tests validate behavior rather than just implementation presence?
+- For cocotb: are assertions meaningful and checking actual values?
+- For iverilog: does testbench use $display for PASS/FAIL reporting?
+
+## 4. Completeness (0-10)
+- Is there a sufficient number of test scenarios for the design complexity?
+- Are both functional and corner-case tests present?
+- Do tests cover reset behavior, clock domain transitions, error conditions?
+- For bus interfaces: are read/write/burst tests included?
+
+# Output Format
+
+Provide your assessment in the following JSON format:
+
+```json
+{{
+  "overall_alignment_score": <0-10>,
+  "dimensions": {{
+    "coverage_alignment": {{
+      "score": <0-10>,
+      "explanation": "<2-3 sentences>"
+    }},
+    "specificity_match": {{
+      "score": <0-10>,
+      "explanation": "<2-3 sentences>"
+    }},
+    "test_quality": {{
+      "score": <0-10>,
+      "explanation": "<2-3 sentences>"
+    }},
+    "completeness": {{
+      "score": <0-10>,
+      "explanation": "<2-3 sentences>"
+    }}
+  }},
+  "strengths": [
+    "<strength 1>",
+    "<strength 2>"
+  ],
+  "weaknesses": [
+    "<weakness 1>",
+    "<weakness 2>"
+  ],
+  "missing_test_coverage": [
+    "<RTL feature from query not covered by tests>",
+    "<another missing aspect>"
+  ],
+  "recommendation": "<ACCEPT|REJECT|REVISE>",
+  "reasoning": "<2-4 sentences explaining your recommendation>",
+  "improvement_suggestions": [
+    "<specific suggestion for improving test coverage>",
+    "<another suggestion>"
+  ]
+}}
+```
+
+# Guidelines
+
+1. **Be Critical**: Tests must genuinely validate the RTL requirements, not just compile
+2. **Signal-Level Focus**: Prefer tests that check actual signal values over compilation-only tests
+3. **Consider Completeness**: A few excellent testbench scenarios are better than many trivial ones
+4. **Check Module Naming**: Verify testbench instantiates the correct module name from query
+5. **Identify Gaps**: Explicitly call out query requirements without test coverage
+6. **Be Specific**: Provide actionable feedback for Verilog/SystemVerilog context
+
+# Recommendation Criteria
+
+- **ACCEPT** (score >= 8.0): Tests effectively validate the query with minor or no gaps
+- **REVISE** (score 6.0-7.9): Tests are mostly adequate but have notable gaps
+- **REJECT** (score < 6.0): Significant misalignment or tests are insufficient
+
+Now, analyze the alignment between the provided query and test cases, and provide your assessment.

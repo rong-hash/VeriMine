@@ -1,0 +1,143 @@
+# AI File Classification for Verilog/SystemVerilog PR Changes
+
+You are analyzing files changed in a Pull Request to classify them for generating evaluation tasks.
+
+## Context
+Repository: {repo_name}
+PR #{pr_number}: {pr_title}
+Base commit: {base_commit}
+Target commit: {target_commit}
+
+## Changed Files
+{changed_files}
+
+## Git Diff Summary
+{diff_summary}
+
+## Your Task
+
+Classify each changed file into one of two categories:
+
+1. **implementation_files**: RTL source code files that implement the new feature/module
+   - These are the files that the model being evaluated should write/modify
+   - Include: RTL design logic, module definitions, interface implementations
+   - Typically: .v, .sv, .svh, .vh files that contain the main feature RTL code
+
+2. **test_and_build_files**: Everything else needed for testing and building
+   - Testbench files (unit testbenches, cocotb tests, verification components)
+   - Build configuration (Makefile, CMakeLists.txt, FuseSoC .core files)
+   - Simulation scripts (.tcl, .do, .f file lists)
+   - Constraint files (.xdc, .sdc) related to testing
+   - cocotb Python test files (test_*.py)
+   - Verification IP and helpers
+   - Test data files (.mem, .hex)
+
+## Classification Guidelines for Verilog/SystemVerilog
+
+### Test Files (→ test_and_build_files)
+- If a file is in a `/tb/`, `/test/`, `/tests/`, `/testbench/`, `/verif/`, `/dv/`, `/uvm/`, `/cocotb/` directory → test_and_build_files
+- If a file name contains `_tb`, `tb_`, `_test`, `test_`, `testbench` → test_and_build_files
+- If a .py file imports cocotb (`import cocotb`, `from cocotb`) → test_and_build_files
+- If a .sv file contains `program`, `class` (UVM/SV testbench constructs) → likely test_and_build_files
+- Scoreboard, driver, monitor, agent, sequence files → test_and_build_files
+- Files with `\`include "uvm_macros.svh"` → test_and_build_files
+
+### Build/Config Files (→ test_and_build_files)
+- `Makefile`, `GNUmakefile`, `makefile`, `*.mk` → test_and_build_files
+- `CMakeLists.txt`, `*.cmake` → test_and_build_files
+- `*.f`, `*.fl` (file lists for simulators) → test_and_build_files
+- `*.tcl`, `*.do` (simulation scripts) → test_and_build_files
+- `*.core` (FuseSoC core files) → test_and_build_files
+- `*.xdc`, `*.sdc` (constraint files) → test_and_build_files
+- `.github/workflows/*.yml` → test_and_build_files
+
+### Implementation Files (→ implementation_files)
+- `.v`, `.sv` files that define `module` with actual RTL logic → implementation_files
+- `.vh`, `.svh` header/package files that define interfaces, types, constants used by the module → implementation_files
+- Files in `/rtl/`, `/src/`, `/design/`, `/hdl/` directories → likely implementation_files
+- Files that contain `always`, `always_ff`, `always_comb`, `assign` blocks → implementation_files
+
+### Special Cases
+- Package files (`.sv` with `package`) that only define types/constants for testing → test_and_build_files
+- Header files that define parameters used by both design and test → implementation_files (conservative)
+- Simulation models (behavioral models for testing) → test_and_build_files
+- Memory initialization files (.mem, .hex) → test_and_build_files
+- Waveform dump configs → test_and_build_files
+
+**Important**: When in doubt, prefer putting files in `test_and_build_files`. We want the model to implement the core RTL feature, and everything supporting testing/verification should be provided.
+
+## Output Format
+
+Return a JSON object with the following structure:
+```json
+{{
+    "implementation_files": [
+        "rtl/fifo.sv",
+        "rtl/fifo_pkg.svh"
+    ],
+    "test_and_build_files": [
+        "tb/fifo_tb.sv",
+        "test/test_fifo.py",
+        "Makefile"
+    ],
+    "excluded_files": [
+        "README.md",
+        "docs/fifo_spec.md"
+    ],
+    "reasoning": "Brief explanation of key classification decisions",
+    "review_passed": true
+}}
+```
+
+---
+
+## 🔍 Self-Review Step (CRITICAL)
+
+After completing the initial classification, you MUST perform the following validation checks:
+
+### Check 1: Completeness
+Verify that: `implementation_files ∪ test_and_build_files ∪ excluded_files = ALL changed files`
+
+- Count the total files in git diff
+- Count the files in your classification
+- If there are missing files:
+  - Documentation files (.md, .txt, .rst, LICENSE) → add to `excluded_files`
+  - Code/build files → re-classify into the appropriate category
+  - ❌ **NO file should be silently dropped**
+
+### Check 2: Mutual Exclusivity
+Verify that: `implementation_files ∩ test_and_build_files = ∅`
+
+- Check if any file appears in BOTH lists
+- If a file appears in both: re-evaluate and choose one category
+- When in doubt, prefer `test_and_build_files`
+
+### Check 3: Category Correctness
+Verify that each category contains only appropriate files:
+
+**implementation_files should ONLY contain:**
+- Verilog/SystemVerilog source files (.v, .sv, .vh, .svh)
+- That implement the actual RTL feature logic
+- NOT testbench files, NOT build files, NOT documentation
+
+**test_and_build_files should ONLY contain:**
+- Testbench files (*_tb.v, *_tb.sv, test_*.py, etc.)
+- Build configuration (Makefile, *.f, *.core, etc.)
+- Simulation scripts and helpers
+- Verification IP components
+
+### Review Process
+
+```
+1. Output initial classification
+2. Perform Check 1 → If FAIL, fix and re-output
+3. Perform Check 2 → If FAIL, fix and re-output
+4. Perform Check 3 → If FAIL, fix and re-output
+5. Set "review_passed": true only when ALL checks pass
+```
+
+If any check fails, show the error, fix it, and re-output the corrected JSON.
+
+---
+
+Make sure to include ALL changed files in one of the three lists.

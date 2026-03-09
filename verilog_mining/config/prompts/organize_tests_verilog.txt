@@ -1,0 +1,500 @@
+你需要为这个 Verilog/SystemVerilog New Feature 任务生成评测产物，用于自动评测模型实现的新 RTL 功能质量。
+
+## 任务信息
+
+- **Repository**: {repo_url}
+- **Repo Path**: {repo_path}
+- **Base Commit**: {base_commit}（功能实现前）
+- **Target Commit**: {target_commit}（功能实现后）
+- **任务描述**: {query}
+- **语言**: Verilog/SystemVerilog
+
+## 🎯 PR 改动的文件（重要！）
+
+### 测试文件（你应该重点关注这些文件来生成测试脚本）
+{test_files}
+
+### 代码文件（新功能的 RTL 实现文件）
+{code_files}
+
+**⚠️ 关键指导**：
+- 测试脚本应该**优先运行上述测试文件**中的测试
+- 不要运行整个仓库的所有 testbench，只运行与 PR 相关的测试
+- 如果测试文件是新增的（在 base commit 不存在），这正是我们需要的测试
+
+---
+
+## 🆕 产出物结构
+
+最终你需要生成的文件，**直接保存到仓库根目录**：
+
+```
+{repo_path}/
+├── test.patch           # 测试代码补丁（稍后由系统从 PR 生成，你不需要创建）
+└── run-tests.sh         # 一键脚本：编译 + 仿真 + 解析结果
+```
+
+**你只需要生成 run-tests.sh**，test.patch 会由系统自动从 PR 的测试文件变更生成。
+
+---
+
+## 🚨 CRITICAL: 测试验证约束
+
+**生成的测试用例必须严格满足以下约束**：
+
+### 约束 1: 测试在 Base Commit 上应该失败
+测试用例验证的功能**必须在 base commit 上失败或无法运行**。
+
+**为什么会失败？**
+- RTL 模块不存在 → iverilog 编译失败 (module not found)
+- 端口不匹配 → iverilog 编译失败 (port connection error)
+- 功能不完整 → 仿真断言失败 ($error, $fatal)
+- cocotb 测试 → 模块实例化失败或功能检查失败
+
+**验证方法**：
+```bash
+# 1. 切换到 base commit
+cd {repo_path}
+git checkout {base_commit}
+git clean -fdx
+
+# 2. 应用 test.patch（确保测试代码存在）
+git apply test.patch
+
+# 3. 运行测试
+bash run-tests.sh
+
+# 4. 预期结果：
+# - 编译失败（iverilog 报错：模块未定义）
+# - 或者仿真断言失败
+# - 输出："Passed: 0, Failed: X" 或 exit code != 0
+```
+
+### 约束 2: 测试在 Target Commit 上应该成功
+测试用例**必须在 target commit 上全部通过**。
+
+**验证方法**：
+```bash
+# 1. 切换到 target commit
+cd {repo_path}
+git checkout {target_commit}
+git clean -fdx
+
+# 2. 应用 test.patch
+git apply test.patch
+
+# 3. 运行测试
+bash run-tests.sh
+
+# 4. 预期结果：
+# - 编译成功
+# - 所有仿真测试通过
+# - 输出："Passed: X, Failed: 0" 且 exit code == 0
+```
+
+### 约束 3: 测试选择策略
+
+**🎯 直接使用上方提供的 `{test_files}` 列表**
+
+这些测试文件已经由 AI 分类步骤从 PR 中识别出来，包含：
+- PR 中新增的 testbench 文件（专门测试新功能）
+- PR 中修改的测试文件（测试功能增强）
+- PR 中新增的 cocotb 测试文件
+
+**你的任务**：
+1. ✅ 使用提供的 `{test_files}` 生成仿真命令
+2. ✅ 正确设置 include 路径和编译选项
+3. ❌ 不要运行整个仓库的测试
+4. ❌ 不要自己去发现测试文件（已经提供了）
+
+---
+
+## 你的任务
+
+完成以下步骤：
+
+### 步骤 1: 分析仿真工具和测试框架
+
+**分析方法**：
+
+#### 🔥 首先检查 Makefile 和仿真配置（CRITICAL!）
+
+```bash
+echo "=== 🔍 Reading Simulation Configuration (CRITICAL!) ==="
+
+# 检查 Makefile 中的仿真工具
+if ls Makefile makefile GNUmakefile 2>/dev/null; then
+    echo "Found Makefile:"
+
+    # 1. 🔴 检测仿真工具
+    echo "--- Simulator Detection ---"
+    grep -iE 'SIM\s*=|SIMULATOR\s*=|iverilog|verilator|cocotb|vvp' Makefile* 2>/dev/null | head -10
+
+    # 2. 🔴 检测 cocotb 配置
+    echo "--- cocotb Detection ---"
+    grep -iE 'MODULE\s*=|TOPLEVEL\s*=|TOPLEVEL_LANG\s*=|cocotb' Makefile* 2>/dev/null | head -10
+
+    # 3. 🔴 检查是否依赖商业 EDA（必须排除！）
+    echo "--- Commercial EDA Check (CRITICAL!) ---"
+    if grep -iE 'vcs|questa|xrun|irun|vsim|modelsim|ncvlog|xcelium' Makefile* 2>/dev/null; then
+        echo "⚠️ WARNING: Commercial EDA tools detected! Must use open-source alternatives"
+    else
+        echo "✓ No commercial EDA tools detected"
+    fi
+
+    # 4. 提取 include 路径
+    echo "--- Include Paths ---"
+    grep -iE '\-I\s|INCLUDE|VERILOG_INCLUDE' Makefile* 2>/dev/null | head -10
+fi
+
+# 检查 cocotb Python 测试
+echo ""
+echo "=== cocotb Tests ==="
+find . -name "test_*.py" -exec grep -l "import cocotb\|from cocotb" {{}} \; 2>/dev/null
+
+# 检查 verilator 配置
+echo ""
+echo "=== Verilator Config ==="
+grep -r "verilator" . --include="Makefile*" --include="CMakeLists.txt" 2>/dev/null | head -10
+
+# 检查 iverilog 相关文件
+echo ""
+echo "=== iverilog Files ==="
+find . -name "*.f" -o -name "*.fl" 2>/dev/null | head -10  # File lists
+```
+
+**🎯 关键输出：记录以下信息用于 run-tests.sh**：
+- **仿真工具**: iverilog, verilator, 或 cocotb
+- **include 路径**: -I flags
+- **顶层模块**: testbench 的顶层模块名
+- **cocotb 配置**: MODULE, TOPLEVEL, SIM 变量
+
+### 步骤 2: 分析 Query 与测试文件的关联
+
+**输入**：
+- `{query}` - 任务描述
+- `{test_files}` - 上方已提供的 PR 测试文件列表
+- `{code_files}` - 上方已提供的 PR 代码文件列表
+
+#### 2.1 深度分析 Query 的验证需求
+
+分析任务描述 `{query}`，提取:
+1. **核心功能点**：需要实现什么 RTL 模块/接口/功能
+2. **验证点**：如何证明功能实现正确
+3. **技术细节**：涉及哪些模块、端口、协议
+
+#### 2.2 阅读并分析 test_files 内容
+
+对于每个 `{test_files}` 测试文件：
+1. 阅读文件内容
+2. 识别 testbench 实例化的模块和连接的端口
+3. 理解每个测试验证的功能点
+4. 对于 cocotb: 识别 @cocotb.test() 装饰的测试函数
+
+#### 2.3 确定仿真命令
+
+根据测试类型生成对应命令：
+
+**cocotb 测试**:
+```bash
+cd <test_directory>
+make SIM=icarus
+# 或者: SIM=icarus TOPLEVEL=<module> MODULE=<test_module> make
+```
+
+**iverilog testbench**:
+```bash
+iverilog -g2012 -o sim.vvp <include_flags> <source_files> <testbench_file>
+vvp sim.vvp
+```
+
+**verilator testbench**:
+```bash
+verilator --cc --exe --build <source_files> <testbench.cpp>
+./obj_dir/V<module>
+```
+
+---
+
+### 步骤 3: 生成 run-tests.sh
+
+**位置**：`{repo_path}/run-tests.sh`（仓库根目录）
+
+**目标**：一键脚本，编译 + 仿真 + 解析结果
+
+**脚本关键要求**：
+
+1. **⚠️ CRITICAL: 不要使用 `set -e`**：必须允许测试失败后继续执行统计
+2. **⚠️ CRITICAL: 不要使用绝对路径**：所有路径必须是相对路径
+3. **🔴 CRITICAL: 必须生成 result.json**：包含 passed, failed, error, total, pass_rate, test_framework, exit_code
+4. **🔴 CRITICAL: 必须输出标准格式统计**：Passed/Failed/Error/Total（向后兼容）
+
+**脚本模板**：
+
+```bash
+#!/bin/bash
+# Auto-generated test runner for Verilog/SystemVerilog
+# Repository: {repo_url}
+
+echo "=========================================="
+echo "Running Verilog/SystemVerilog Tests"
+echo "=========================================="
+
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}" )" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "Working directory: $SCRIPT_DIR"
+echo "Current git status:"
+git log -1 --oneline 2>/dev/null || echo "Not a git repository"
+echo ""
+
+# 初始化统计变量
+TOTAL_PASSED=0
+TOTAL_FAILED=0
+TOTAL_ERROR=0
+OVERALL_EXIT_CODE=0
+TEST_OUTPUT_FILE="./test_output_$$.txt"
+TEST_FRAMEWORK="unknown"
+
+# ============================================
+# 🔴 Step 0: Environment Check
+# ============================================
+echo "=========================================="
+echo "Step 0: Environment Check"
+echo "=========================================="
+
+echo "Checking simulation tools..."
+which iverilog >/dev/null 2>&1 && echo "  ✓ iverilog found: $(iverilog -V 2>&1 | head -1)" || echo "  ✗ iverilog NOT found"
+which verilator >/dev/null 2>&1 && echo "  ✓ verilator found: $(verilator --version 2>&1 | head -1)" || echo "  - verilator not found"
+which cocotb-config >/dev/null 2>&1 && echo "  ✓ cocotb found: $(cocotb-config --version 2>&1)" || echo "  - cocotb not found"
+python3 -c "import cocotb" 2>/dev/null && echo "  ✓ cocotb Python module available" || echo "  - cocotb Python module not available"
+echo ""
+
+# ============================================
+# Step 1: Compile (iverilog) or Configure (cocotb)
+# ============================================
+echo "=========================================="
+echo "Step 1: Compile / Configure"
+echo "=========================================="
+
+# TODO: 根据检测到的仿真工具生成编译命令
+# 例如 iverilog:
+# iverilog -g2012 -o sim.vvp -I include/ src/*.v tb/*.v
+# 例如 cocotb:
+# cd tests && make SIM=icarus
+
+# ============================================
+# Step 2: Run Simulation
+# ============================================
+echo ""
+echo "=========================================="
+echo "Step 2: Run Simulation"
+echo "=========================================="
+
+rm -f "$TEST_OUTPUT_FILE"
+
+# TODO: 替换为实际的仿真命令
+# 例如 iverilog: vvp sim.vvp 2>&1 | tee "$TEST_OUTPUT_FILE"
+# 例如 cocotb: make SIM=icarus 2>&1 | tee "$TEST_OUTPUT_FILE"
+
+TEST_EXIT_CODE=${{PIPESTATUS[0]}}
+
+# ============================================
+# Step 3: Parse Results
+# ============================================
+
+# --- cocotb 结果解析 ---
+parse_cocotb_results() {{
+    local output_file="$1"
+    # cocotb 输出: "X passed, Y failed"
+    RUN_PASSED=$(grep -oP '\d+(?= passed)' "$output_file" 2>/dev/null | tail -1 || echo "0")
+    RUN_FAILED=$(grep -oP '\d+(?= failed)' "$output_file" 2>/dev/null | tail -1 || echo "0")
+    RUN_TOTAL=$((RUN_PASSED + RUN_FAILED))
+    TEST_FRAMEWORK="cocotb"
+
+    # 也检查 results.xml (JUnit format)
+    if [ -f "results.xml" ] && [ "$RUN_TOTAL" -eq 0 ]; then
+        RUN_TOTAL=$(grep -c '<testcase' results.xml 2>/dev/null || echo "0")
+        RUN_FAILED=$(grep -c '<failure' results.xml 2>/dev/null || echo "0")
+        RUN_PASSED=$((RUN_TOTAL - RUN_FAILED))
+    fi
+}}
+
+# --- iverilog/vvp 结果解析 ---
+parse_iverilog_results() {{
+    local output_file="$1"
+    RUN_PASSED=0
+    RUN_FAILED=0
+
+    # 检查 $display 输出中的 PASS/FAIL
+    while IFS= read -r line; do
+        line_upper=$(echo "$line" | tr '[:lower:]' '[:upper:]')
+        if echo "$line_upper" | grep -qE '\bPASS(ED)?\b' && ! echo "$line_upper" | grep -q 'PASSWORD'; then
+            RUN_PASSED=$((RUN_PASSED + 1))
+        fi
+        if echo "$line_upper" | grep -qE '\bFAIL(ED)?\b'; then
+            RUN_FAILED=$((RUN_FAILED + 1))
+        fi
+    done < "$output_file"
+
+    # 检查 "All tests passed" 模式
+    if grep -qi "all tests\? pass" "$output_file" 2>/dev/null; then
+        if [ "$RUN_PASSED" -eq 0 ]; then RUN_PASSED=1; fi
+        RUN_FAILED=0
+    fi
+
+    RUN_TOTAL=$((RUN_PASSED + RUN_FAILED))
+
+    # 如果没有 PASS/FAIL 输出，检查 $finish（正常结束=通过）
+    if [ "$RUN_TOTAL" -eq 0 ]; then
+        if grep -q '\$finish\|finish called' "$output_file" 2>/dev/null; then
+            RUN_PASSED=1
+            RUN_TOTAL=1
+        fi
+    fi
+
+    TEST_FRAMEWORK="iverilog"
+}}
+
+# --- UVM 结果解析 ---
+parse_uvm_results() {{
+    local output_file="$1"
+    UVM_ERRORS=$(grep -oP 'UVM_ERROR\s*:\s*\K\d+' "$output_file" 2>/dev/null | tail -1 || echo "0")
+    UVM_FATALS=$(grep -oP 'UVM_FATAL\s*:\s*\K\d+' "$output_file" 2>/dev/null | tail -1 || echo "0")
+
+    if [ "$((UVM_ERRORS + UVM_FATALS))" -eq 0 ]; then
+        RUN_PASSED=1
+        RUN_FAILED=0
+    else
+        RUN_PASSED=0
+        RUN_FAILED=1
+    fi
+    RUN_TOTAL=1
+    TEST_FRAMEWORK="uvm"
+}}
+
+# 根据实际测试框架调用解析函数
+if [ -f "$TEST_OUTPUT_FILE" ]; then
+    # TODO: 根据实际测试框架选择解析函数
+    # 优先 cocotb → UVM → iverilog
+    if grep -q "cocotb\|passed.*failed" "$TEST_OUTPUT_FILE" 2>/dev/null; then
+        parse_cocotb_results "$TEST_OUTPUT_FILE"
+    elif grep -q "UVM_ERROR\|UVM_FATAL\|UVM_INFO" "$TEST_OUTPUT_FILE" 2>/dev/null; then
+        parse_uvm_results "$TEST_OUTPUT_FILE"
+    else
+        parse_iverilog_results "$TEST_OUTPUT_FILE"
+    fi
+
+    TOTAL_PASSED=$((TOTAL_PASSED + ${{RUN_PASSED:-0}}))
+    TOTAL_FAILED=$((TOTAL_FAILED + ${{RUN_FAILED:-0}}))
+fi
+
+if [ $TEST_EXIT_CODE -ne 0 ]; then
+    OVERALL_EXIT_CODE=1
+fi
+
+# ============================================
+# Step 4: Output Results
+# ============================================
+echo ""
+echo "=========================================="
+echo "Test Results Summary:"
+echo "=========================================="
+
+TOTAL=$((TOTAL_PASSED + TOTAL_FAILED + TOTAL_ERROR))
+
+echo "Passed: $TOTAL_PASSED"
+echo "Failed: $TOTAL_FAILED"
+echo "Error: $TOTAL_ERROR"
+echo "Total: $TOTAL"
+
+if [ $TOTAL -gt 0 ]; then
+    PASS_RATE=$(awk "BEGIN {{printf \"%.1f\", ($TOTAL_PASSED/$TOTAL)*100}}")
+    echo "Pass Rate: $PASS_RATE%"
+else
+    echo "Pass Rate: 0.0%"
+fi
+
+echo "Exit Code: $OVERALL_EXIT_CODE"
+echo "=========================================="
+
+# 🆕 生成 result.json
+if [ $TOTAL -gt 0 ]; then
+    PASS_RATE_JSON=$(awk "BEGIN {{printf \"%.3f\", ($TOTAL_PASSED/$TOTAL)}}")
+else
+    PASS_RATE_JSON="0.0"
+fi
+
+cat > "$SCRIPT_DIR/result.json" << RESULT_EOF
+{{
+  "passed": $TOTAL_PASSED,
+  "failed": $TOTAL_FAILED,
+  "error": $TOTAL_ERROR,
+  "total": $TOTAL,
+  "pass_rate": $PASS_RATE_JSON,
+  "test_framework": "$TEST_FRAMEWORK",
+  "exit_code": $OVERALL_EXIT_CODE
+}}
+RESULT_EOF
+
+echo ""
+echo "✓ Generated result.json"
+
+rm -f "$TEST_OUTPUT_FILE"
+
+exit $OVERALL_EXIT_CODE
+```
+
+**关键点**：
+1. **不使用 `set -e`**: 允许测试失败后继续统计
+2. **不使用绝对路径**: 保证可移植性
+3. **必须生成 result.json**: 供自动化系统解析
+4. **根据项目实际使用的仿真工具写对应的命令和解析函数**
+5. **包含 cocotb / iverilog / UVM 三种解析器**
+6. **脚本在仓库根目录运行**
+
+---
+
+## 最终输出要求
+
+1. **生成 run-tests.sh 文件**：在 `{repo_path}/run-tests.sh`
+2. **设置可执行权限**：`chmod +x run-tests.sh`
+3. **输出 JSON 总结**
+
+**输出 JSON 格式**：
+
+```json
+{{
+  "language": "verilog",
+  "simulation_tool": "iverilog|verilator|cocotb",
+  "test_frameworks": ["cocotb", "iverilog_tb", "uvm"],
+  "compile_command": "iverilog -g2012 -o sim.vvp ...",
+  "test_command": "vvp sim.vvp",
+  "include_paths": ["-I rtl/", "-I include/"],
+  "query_analysis": {{
+    "core_features": ["功能点1", "功能点2"],
+    "verification_points": ["验证点1", "验证点2"],
+    "key_modules": ["模块1", "模块2"]
+  }},
+  "test_files_from_pr": [
+    "tb/fifo_tb.sv (PR新增)",
+    "test/test_fifo.py (PR修改)"
+  ],
+  "project_type": "RTL Design",
+  "scripts_generated": ["run-tests.sh"],
+  "status": "success",
+  "notes": "根据PR分析只运行相关测试"
+}}
+```
+
+---
+
+## 重要提醒
+
+1. **⚠️ 只生成 run-tests.sh**：直接保存到仓库根目录
+2. **⚠️ 只用相对路径**：脚本中禁止使用绝对路径
+3. **⚠️ 精准测试选择**：只运行 PR 相关的测试
+4. **⚠️ 不要使用商业 EDA 工具**：只能用 iverilog、verilator、cocotb
+5. **不要修改 RTL 源代码**：只生成测试脚本
+
+现在开始执行上述步骤，生成 run-tests.sh 并返回 JSON 总结。

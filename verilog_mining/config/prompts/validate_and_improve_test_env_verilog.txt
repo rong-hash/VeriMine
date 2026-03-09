@@ -1,0 +1,310 @@
+你需要验证并改进刚刚生成的 Verilog/SystemVerilog 测试环境。这是一个关键的质量保证步骤。
+
+## 任务目标
+
+1. ✅ **验证测试环境** - 检查仿真配置、测试可运行性、覆盖度
+2. 🔧 **自动修复问题** - 发现问题后立即修复
+3. 📈 **提升测试质量** - 改进测试脚本、优化配置
+
+## 输入信息
+
+- **任务描述**: {query}
+- **仓库路径**: {repo_path}
+- **Base Commit**: {base_commit}
+- **Target Commit**: {target_commit}
+- **任务目录**: {task_dir}
+
+## 🆕 产出物结构
+
+我们已经在 `{task_dir}` 目录下生成了以下文件：
+```
+{task_dir}/
+├── test.patch           # 测试代码补丁
+├── code.patch           # RTL 实现代码补丁
+└── run-tests.sh         # 一键脚本：编译 + 仿真 + 解析结果
+```
+
+**重要**：如果验证发现问题，你需要修复 `{task_dir}` 目录下的这些文件。
+
+❌ **禁止操作**：
+- ❌ 不要在仓库的 `tb/` 或 `test/` 目录下创建任何新文件
+- ❌ 不要在仓库的 testbench 目录下修改现有测试文件
+- ❌ 不要直接操作仓库的测试文件
+
+---
+
+## 🚨 CRITICAL: 精准验证约束
+
+**测试环境必须满足以下核心约束**：
+
+### 核心要求：无实现失败，有实现成功
+
+**验证逻辑**：全部基于 base commit，通过 patch 控制变量
+
+1. **无实现代码时**：测试应该失败
+   - 状态：base commit + test.patch（只有测试代码，没有 RTL 实现）
+   - 预期：exit code != 0，编译失败或仿真断言失败
+   - 验证步骤：
+     1. `git checkout {base_commit}`
+     2. `git apply test.patch`
+     3. `bash run-tests.sh` → **预期失败**
+
+2. **有实现代码时**：测试应该通过
+   - 状态：base commit + test.patch + code.patch（测试代码 + RTL 实现代码）
+   - 预期：exit code == 0，所有测试通过
+   - 验证步骤：
+     1. `git checkout {base_commit}`
+     2. `git apply test.patch`
+     3. `git apply code.patch`
+     4. `bash run-tests.sh` → **预期成功**
+
+**为什么这样更精准？**
+- code.patch 是唯一变量，精确验证测试脚本是否正确检测 RTL 功能实现
+- 不依赖 commit 切换，全部基于 base commit + patch
+
+---
+
+## 执行流程
+
+### 阶段 1: 验证 run-tests.sh
+
+#### 1.1 检查脚本存在和权限
+
+```bash
+if [ -f "{task_dir}/run-tests.sh" ]; then
+    echo "✓ run-tests.sh exists"
+    ls -la {task_dir}/run-tests.sh
+else
+    echo "✗ run-tests.sh not found"
+fi
+
+if [ -x "{task_dir}/run-tests.sh" ]; then
+    echo "✓ run-tests.sh is executable"
+else
+    chmod +x {task_dir}/run-tests.sh
+fi
+```
+
+#### 1.2 检查脚本内容
+
+```bash
+echo "=== run-tests.sh content ==="
+cat {task_dir}/run-tests.sh | head -80
+
+echo ""
+echo "=== Key elements check ==="
+grep -n "iverilog\|verilator\|cocotb\|vvp\|make" {task_dir}/run-tests.sh || echo "No simulation commands found"
+
+# 🆕 检查 result.json 生成
+echo ""
+echo "=== 🔴 result.json generation check (CRITICAL!) ==="
+if grep -q "result.json" {task_dir}/run-tests.sh; then
+    echo "✓ Found result.json generation"
+else
+    echo "❌ ERROR: run-tests.sh does not generate result.json"
+fi
+
+# 检查是否使用商业 EDA（CRITICAL!）
+echo ""
+echo "=== Commercial EDA Check ==="
+if grep -iE 'vcs|questa|xrun|irun|vsim|modelsim' {task_dir}/run-tests.sh; then
+    echo "❌ ERROR: Commercial EDA tool detected in run-tests.sh!"
+    echo "Must use only: iverilog, verilator, cocotb"
+else
+    echo "✓ No commercial EDA tools"
+fi
+```
+
+### 阶段 2: 验证 test.patch 和 code.patch
+
+```bash
+if [ -f "{task_dir}/test.patch" ]; then
+    echo "✓ test.patch exists ($(wc -c < {task_dir}/test.patch) bytes)"
+    grep "^diff --git" {task_dir}/test.patch | head -10
+else
+    echo "✗ test.patch not found"
+fi
+
+if [ -f "{task_dir}/code.patch" ]; then
+    echo "✓ code.patch exists ($(wc -c < {task_dir}/code.patch) bytes)"
+    grep "^diff --git" {task_dir}/code.patch | head -10
+else
+    echo "✗ code.patch not found"
+fi
+```
+
+### 阶段 3: 测试无实现代码时（应该失败）
+
+**验证：base + test.patch → 失败**
+
+```bash
+cd {repo_path}
+git checkout {base_commit}
+git clean -fdx
+
+cp {task_dir}/run-tests.sh ./run-tests.sh
+chmod +x run-tests.sh
+
+# 只应用 test.patch
+git apply {task_dir}/test.patch 2>/dev/null || git apply --3way {task_dir}/test.patch 2>/dev/null || echo "Warning: Could not apply test.patch"
+
+bash run-tests.sh 2>&1 | tee ./test_without_code.log
+WITHOUT_CODE_EXIT=$?
+
+echo "Test without code.patch exit code: $WITHOUT_CODE_EXIT"
+if [ $WITHOUT_CODE_EXIT -ne 0 ]; then
+    echo "✅ Tests FAILED without implementation (as expected)"
+else
+    echo "❌ Tests PASSED without implementation (unexpected!)"
+fi
+```
+
+### 阶段 4: 测试有实现代码时（应该成功）
+
+**验证：base + test.patch + code.patch → 成功**
+
+```bash
+cd {repo_path}
+git checkout {base_commit}
+git clean -fdx
+
+cp {task_dir}/run-tests.sh ./run-tests.sh
+chmod +x run-tests.sh
+
+git apply {task_dir}/test.patch 2>/dev/null || git apply --3way {task_dir}/test.patch 2>/dev/null
+git apply {task_dir}/code.patch 2>/dev/null || git apply --3way {task_dir}/code.patch 2>/dev/null
+
+bash run-tests.sh 2>&1 | tee ./test_with_code.log
+WITH_CODE_EXIT=$?
+
+echo "Test with code.patch exit code: $WITH_CODE_EXIT"
+if [ $WITH_CODE_EXIT -eq 0 ]; then
+    echo "✅ Tests PASSED with implementation (as expected)"
+else
+    echo "❌ Tests FAILED with implementation (unexpected!)"
+fi
+
+# 🆕 验证 result.json
+echo ""
+echo "=== 🔴 Validating result.json ==="
+if [ -f "./result.json" ]; then
+    echo "✓ result.json generated:"
+    cat ./result.json
+
+    if python3 -c "import json; json.load(open('./result.json'))" 2>/dev/null; then
+        echo "✓ JSON format valid"
+
+        JSON_PASSED=$(python3 -c "import json; print(json.load(open('./result.json')).get('passed', -1))")
+        JSON_FAILED=$(python3 -c "import json; print(json.load(open('./result.json')).get('failed', -1))")
+        JSON_TOTAL=$(python3 -c "import json; print(json.load(open('./result.json')).get('total', -1))")
+        JSON_EXIT=$(python3 -c "import json; print(json.load(open('./result.json')).get('exit_code', -1))")
+
+        echo "From result.json: passed=$JSON_PASSED, failed=$JSON_FAILED, total=$JSON_TOTAL, exit=$JSON_EXIT"
+    else
+        echo "❌ Invalid JSON format"
+    fi
+else
+    echo "❌ result.json was not generated"
+fi
+```
+
+### 阶段 5: 分析和修复问题
+
+**🔴 问题 0: 仿真工具未安装**
+
+```bash
+# 检查缺失的工具
+grep -i "not found\|command not found\|No such file" ./test_with_code.log | head -10
+```
+
+**修复**：确保 run-tests.sh 使用已安装的仿真工具（iverilog 通常已安装）
+
+**问题 A: 有实现代码时编译/仿真失败**
+```bash
+grep -iE 'error|failed|not found|undefined' ./test_with_code.log | head -20
+
+# 常见 iverilog 错误：
+# - "Unknown module type" → 缺少 include 路径或源文件
+# - "syntax error" → 需要 -g2012 标志（SystemVerilog）
+# - "port connection" → 端口名不匹配
+```
+
+**问题 B: 无实现代码时测试通过（不应该）**
+```bash
+# 这说明测试没有正确验证新功能
+# 可能原因：
+# 1. testbench 不依赖新增的 RTL 模块
+# 2. 编译时没有 include 正确的测试文件
+# 修复: 修改 run-tests.sh 中的文件列表和 include 路径
+```
+
+**🆕 问题 C: result.json 问题**
+
+1. **result.json 不存在**: 在 run-tests.sh 末尾添加 result.json 生成代码
+2. **JSON 格式错误**: 检查 heredoc 语法
+3. **数值不合理**: 修改解析函数匹配实际仿真输出
+
+**问题 D: patch 应用失败**
+```bash
+git apply --check {task_dir}/code.patch
+# 修复：调整 patch 文件或使用 --3way
+```
+
+### 阶段 6: 最终验证
+
+```bash
+echo "=========================================="
+echo "最终验证结果"
+echo "=========================================="
+echo "无实现代码 (应该失败): $WITHOUT_CODE_EXIT"
+echo "有实现代码 (应该成功): $WITH_CODE_EXIT"
+
+if [ $WITHOUT_CODE_EXIT -ne 0 ] && [ $WITH_CODE_EXIT -eq 0 ]; then
+    echo "✅ 测试环境验证通过！"
+    VALIDATION_STATUS="success"
+elif [ $WITHOUT_CODE_EXIT -eq 0 ]; then
+    echo "❌ 无实现代码时测试通过了（不应该）"
+    VALIDATION_STATUS="warning"
+elif [ $WITH_CODE_EXIT -ne 0 ]; then
+    echo "❌ 有实现代码时测试失败了（不应该）"
+    VALIDATION_STATUS="warning"
+else
+    VALIDATION_STATUS="partial"
+fi
+echo "=========================================="
+```
+
+---
+
+## 最终输出格式
+
+**重要：必须输出 JSON 格式，使用 ```json 代码块包裹**
+
+```json
+{{
+  "validation_status": "success",
+  "without_code_behavior": "expected_fail",
+  "with_code_behavior": "expected_pass",
+  "tests_passed": 12,
+  "tests_failed": 0,
+  "issues_fixed": [
+    "修复 iverilog include 路径",
+    "添加 -g2012 标志支持 SystemVerilog"
+  ],
+  "quality_score_before": 6.5,
+  "quality_score_after": 9.0,
+  "can_use": true,
+  "simulation_tool": "iverilog",
+  "summary": "测试环境验证通过，使用 iverilog 仿真"
+}}
+```
+
+## 关键原则
+
+1. **发现问题立即修复** - 不要只报告问题
+2. **验证修复效果** - 每次修复后重新测试
+3. **行为正确性** - 无实现代码时失败，有实现代码时成功
+4. **只用相对路径** - 脚本中禁止使用绝对路径
+5. **只用开源工具** - iverilog, verilator, cocotb（禁止 VCS, Questa, Xcelium）
+
+现在开始执行验证和改进流程，并返回完整的 JSON 报告。

@@ -1,0 +1,10 @@
+{"repo": "lowRISC/opentitan", "full_name": "lowRISC/opentitan", "stars": 3161, "sv_ratio": -1, "sv_file_count": -1, "has_ci": true, "pr_total": 21842, "default_branch": "master"}
+{"repo": "lowRISC/ibex", "full_name": "lowRISC/ibex", "stars": 1774, "sv_ratio": -1, "sv_file_count": -1, "has_ci": true, "pr_total": 1475, "default_branch": "master"}
+{"repo": "openhwgroup/cva6", "full_name": "openhwgroup/cva6", "stars": 2827, "sv_ratio": -1, "sv_file_count": -1, "has_ci": true, "pr_total": 1915, "default_branch": "master"}
+{"repo": "openhwgroup/cva5", "full_name": "openhwgroup/cva5", "stars": 128, "sv_ratio": -1, "sv_file_count": -1, "has_ci": false, "pr_total": 17, "default_branch": "master"}
+{"repo": "openhwgroup/cvw", "full_name": "openhwgroup/cvw", "stars": 493, "sv_ratio": -1, "sv_file_count": -1, "has_ci": true, "pr_total": 1349, "default_branch": "main"}
+{"repo": "openhwgroup/cv32e40x", "full_name": "openhwgroup/cv32e40x", "stars": 259, "sv_ratio": -1, "sv_file_count": -1, "has_ci": false, "pr_total": 775, "default_branch": "master"}
+{"repo": "openhwgroup/cv32e40p", "full_name": "openhwgroup/cv32e40p", "stars": 1190, "sv_ratio": -1, "sv_file_count": -1, "has_ci": true, "pr_total": 535, "default_branch": "master"}
+{"repo": "openhwgroup/cv32e40s", "full_name": "openhwgroup/cv32e40s", "stars": 155, "sv_ratio": -1, "sv_file_count": -1, "has_ci": false, "pr_total": 438, "default_branch": "master"}
+{"repo": "openhwgroup/cv-hpdcache", "full_name": "openhwgroup/cv-hpdcache", "stars": 101, "sv_ratio": -1, "sv_file_count": -1, "has_ci": true, "pr_total": 98, "default_branch": "master"}
+{"repo": "openhwgroup/core-v-mcu", "full_name": "openhwgroup/core-v-mcu", "stars": 195, "sv_ratio": -1, "sv_file_count": -1, "has_ci": true, "pr_total": 207, "default_branch": "master"}

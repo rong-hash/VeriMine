@@ -1,0 +1,11 @@
+{"repo": "The-OpenROAD-Project/OpenROAD", "full_name": "The-OpenROAD-Project/OpenROAD", "stars": 2380, "sv_ratio": 0.759532109528615, "sv_file_count": 227, "has_ci": true, "pr_total": 6669, "default_branch": "master"}
+{"repo": "vortexgpgpu/vortex", "full_name": "vortexgpgpu/vortex", "stars": 1866, "sv_ratio": 0.6201137027305059, "sv_file_count": 215, "has_ci": true, "pr_total": 124, "default_branch": "master"}
+{"repo": "analogdevicesinc/hdl", "full_name": "analogdevicesinc/hdl", "stars": 1829, "sv_ratio": 0.5245128238942399, "sv_file_count": 697, "has_ci": true, "pr_total": 1883, "default_branch": "main"}
+{"repo": "olofk/serv", "full_name": "olofk/serv", "stars": 1734, "sv_ratio": 0.8025843729718035, "sv_file_count": 76, "has_ci": true, "pr_total": 88, "default_branch": "main"}
+{"repo": "chili-chips-ba/wireguard-fpga", "full_name": "chili-chips-ba/wireguard-fpga", "stars": 1294, "sv_ratio": 0.9018867666187445, "sv_file_count": 872, "has_ci": false, "pr_total": 16, "default_branch": "main"}
+{"repo": "lnis-uofu/OpenFPGA", "full_name": "lnis-uofu/OpenFPGA", "stars": 1039, "sv_ratio": 0.57259211431038, "sv_file_count": 748, "has_ci": true, "pr_total": 1794, "default_branch": "master"}
+{"repo": "YosysHQ/apicula", "full_name": "YosysHQ/apicula", "stars": 617, "sv_ratio": 0.5113806513964115, "sv_file_count": 195, "has_ci": true, "pr_total": 317, "default_branch": "master"}
+{"repo": "lowRISC/opentitan", "full_name": "lowRISC/opentitan", "stars": 3101, "sv_ratio": 0.46877104876936465, "sv_file_count": 3941, "has_ci": true, "pr_total": 21601, "default_branch": "master"}
+{"repo": "lowRISC/ibex", "full_name": "lowRISC/ibex", "stars": 1740, "sv_ratio": 0.7152938470288197, "sv_file_count": 646, "has_ci": true, "pr_total": 1460, "default_branch": "master"}
+{"repo": "pulp-platform/common_cells", "full_name": "pulp-platform/common_cells", "stars": 697, "sv_ratio": 0.9559887673572595, "sv_file_count": 133, "has_ci": true, "pr_total": 212, "default_branch": "master"}
+{"repo": "chipsalliance/sv-tests", "full_name": "chipsalliance/sv-tests", "stars": 356, "sv_ratio": 0.7110913589838868, "sv_file_count": 1032, "has_ci": true, "pr_total": 7765, "default_branch": "master"}

@@ -1,0 +1,77 @@
+你是一个挑剔的硬件设计 query 质量评审专家。请评估以下 query 的质量。
+
+## Query 信息
+
+- **Query Level**: {query_level} (simple / medium / detailed)
+- **Module Name**: {module_name}
+- **Repository**: {repo_path}
+
+## 被评估的 Query
+
+[BEGIN_OF_QUERY]
+{query}
+[END_OF_QUERY]
+
+## 评估标准
+
+请根据 query_level 使用不同的评估标准：
+
+### 通用标准 (所有 level)
+
+1. **功能完整性** (0-10): Query 是否覆盖了模块的核心功能？
+   - 一个好的 query 应该让工程师知道要实现什么
+   - 不能遗漏关键功能点
+
+2. **用户视角真实性** (0-10): 是否像真实用户写的需求？
+   - ❌ 不能像"看过源码的人"写的
+   - ❌ 不能包含实现细节（内部信号名、状态编码、具体逻辑）
+   - ✅ 应该像"需要新功能的工程师"写的
+
+3. **无歧义性** (0-10): 描述是否足够清晰？
+   - 工程师按照 query 实现后，结果是否能通过测试？
+   - 是否有多种合理解读导致不同实现？
+
+### Level-specific 标准
+
+**Simple Level**:
+- 应该在 2-3 句话内完成
+- 只描述高层功能，不涉及具体接口
+- 评分重点：简洁性、功能覆盖
+
+**Medium Level**:
+- 200-400 字
+- 必须包含端口名、参数名、位宽
+- 评分重点：接口完整性、行为描述准确性
+
+**Detailed Level**:
+- 400-800 字
+- 必须包含完整端口表、参数表、时序描述
+- 评分重点：规格完整性、能否独立实现
+
+## 输出格式
+
+```json
+{{
+    "functional_completeness": {{
+        "score": <0-10>,
+        "reasoning": "..."
+    }},
+    "user_perspective": {{
+        "score": <0-10>,
+        "reasoning": "..."
+    }},
+    "unambiguity": {{
+        "score": <0-10>,
+        "reasoning": "..."
+    }},
+    "level_specific": {{
+        "score": <0-10>,
+        "reasoning": "..."
+    }},
+    "overall_score": <0-10 加权平均>,
+    "improvement_suggestions": ["..."],
+    "pass": true/false
+}}
+```
+
+`pass` 为 true 当且仅当 `overall_score >= {quality_threshold}`。

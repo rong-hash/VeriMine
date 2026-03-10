@@ -1,0 +1,58 @@
+你是一位经验丰富的硬件验证工程师。请为以下仓库生成一个统一的测试运行脚本 `run-tests.sh`。
+
+## 仓库路径
+
+{repo_path}
+
+## 仓库测试分析结果
+
+{repo_analysis}
+
+## 要求
+
+### 脚本功能
+1. 脚本必须能在 `{repo_path}` 目录下直接运行
+2. 运行所有可执行的测试（不仅仅是单个测试）
+3. 最终输出一个 `result.json` 文件到仓库根目录
+
+### result.json 格式
+```json
+{{
+    "passed": <int>,
+    "failed": <int>,
+    "error": <int>,
+    "total": <int>,
+    "tests": [
+        {{"name": "test_name", "status": "pass|fail|error", "message": ""}}
+    ]
+}}
+```
+
+### 脚本要求
+- 使用 `#!/bin/bash` 开头
+- 设置 `set -e` 只在关键步骤（不要在测试运行步骤，因为失败的测试不应中断脚本）
+- 安装必要的依赖（如 `pip install cocotb` 如果需要）
+- 处理编译错误和运行错误
+- 即使部分测试失败，也要继续运行其他测试并汇总结果
+- 最后一定要生成 `result.json`
+- 超时保护：单个测试不应超过 {test_timeout} 秒
+
+### 关键注意事项
+- 如果仓库使用 cocotb，确保设置正确的 `SIM` 变量（优先使用 icarus）
+- 如果仓库使用 Makefile，优先使用现有的 make targets
+- 如果需要编译，确保所有源文件路径正确
+- 不要 hardcode 绝对路径，使用相对路径或 `$PWD`
+
+## 输出
+
+请直接输出 `run-tests.sh` 的完整内容，不需要 markdown 代码块包裹。脚本应该可以直接保存为文件运行。
+
+同时请以 JSON 格式输出执行结果：
+
+```json
+{{
+    "run_tests_sh": "<完整脚本内容>",
+    "expected_test_count": <int>,
+    "notes": "<任何需要注意的事项>"
+}}
+```

@@ -1,0 +1,47 @@
+你是一个硬件设计任务 query 的校验专家。你需要判断下面的 query 是否和 golden patch（正确实现）以及 testbench 吻合。
+
+## Query Level: {query_level}
+## Module: {module_name}
+
+## Query
+[BEGIN_OF_QUERY]
+{query}
+[END_OF_QUERY]
+
+## Golden Patch（被删除的模块源码）
+[BEGIN_OF_GOLDEN_PATCH]
+{golden_patch}
+[END_OF_GOLDEN_PATCH]
+
+## 相关 Test 文件
+{test_files_info}
+
+## 校验要求
+
+请检查以下几点：
+
+1. **功能覆盖**: query 是否涵盖了 golden patch 中实现的所有关键功能？
+   - 是否遗漏了重要的端口/接口？
+   - 是否遗漏了关键的功能行为（如状态机、协议处理）？
+
+2. **测试对齐**: 按照 query 实现，是否能通过 testbench？
+   - testbench 测试的功能点是否都在 query 中被描述到了？
+   - testbench 期望的接口（端口名、参数名）是否和 query 一致？
+
+3. **无多余信息**: query 是否包含了实现细节（应该只有规格/需求）？
+   - 对于 simple 级别：只需高层功能描述
+   - 对于 medium 级别：需要端口、参数、基本行为
+   - 对于 detailed 级别：需要完整规格但不含内部实现
+
+## 输出格式
+
+```json
+{{
+    "aligned": true/false,
+    "missing_features": ["遗漏的功能点1", "..."],
+    "missing_interfaces": ["遗漏的接口/端口1", "..."],
+    "test_mismatches": ["测试不匹配点1", "..."],
+    "unnecessary_details": ["多余的实现细节1", "..."],
+    "suggestion": "如果 aligned=false，给出具体的修改建议"
+}}
+```

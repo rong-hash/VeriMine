@@ -1,0 +1,68 @@
+你是一位经验丰富的硬件验证工程师。请探索以下 Verilog/SystemVerilog 仓库，分析其结构，并搭建好运行环境。
+
+## 仓库路径
+
+{repo_path}
+
+## 任务
+
+### Step 1: 探索仓库结构
+- 浏览目录结构，理解项目组织方式
+- 识别核心 RTL 模块及其功能
+- 找到所有 testbench 和测试文件
+- 查看 Makefile、CMakeLists.txt、requirements.txt 等构建/配置文件
+- 检测测试框架（cocotb / verilator / iverilog / UVM / 自定义脚本）
+
+### Step 2: 分析依赖
+- 运行测试需要什么工具（iverilog, verilator, cocotb, python, make, cmake, 等）
+- 需要安装哪些 Python 包（cocotb, cocotb-bus, pytest, 等）
+- 需要安装哪些系统包（如 libelf-dev, zlib1g-dev 等）
+- 是否需要编译 verilator model 或其他预处理步骤
+- 是否有 submodule 需要初始化
+
+### Step 3: 搭建环境
+实际尝试安装依赖、编译、运行测试。遇到报错就修复，直到环境可用。
+
+可用的工具：
+- iverilog (已安装)
+- verilator (已安装)
+- python3 + pip (已安装)
+- make, cmake (已安装)
+- cocotb 可通过 pip 安装
+
+### Step 4: 写 setup.sh
+把你搭建环境的所有步骤写成一个 `setup.sh` 脚本，放在 `{repo_path}/setup.sh`。
+这个脚本应该：
+- 安装所有 Python 依赖（pip install）
+- 安装所需系统包（apt-get install）
+- 初始化 submodule（如果需要）
+- 编译/预处理（如果需要）
+- 设置环境变量（如果需要）
+- 脚本必须是幂等的（重复运行不报错）
+
+### Step 5: 判断可测试性
+- 此仓库能否用 iverilog/verilator/cocotb 跑测试？
+- 如果需要商业工具（VCS, Questa, Xcelium）才能测试，标记为不可测试
+
+## 输出格式
+
+```json
+{{
+    "test_framework": "cocotb|verilator|iverilog|uvm|custom|none",
+    "is_testable": true/false,
+    "reject_reason": "",
+    "test_files": [
+        {{"path": "tb/test_alu.py", "framework": "cocotb", "tests_module": "alu"}}
+    ],
+    "test_dirs": ["tb/", "tests/"],
+    "dependencies": {{
+        "tools": ["iverilog", "cocotb"],
+        "python_packages": ["cocotb", "cocotb-bus"],
+        "system_packages": []
+    }},
+    "build_system": "make|cmake|custom|none",
+    "existing_test_commands": ["make sim", "cd tb && make"],
+    "setup_sh_path": "{repo_path}/setup.sh",
+    "notes": ""
+}}
+```

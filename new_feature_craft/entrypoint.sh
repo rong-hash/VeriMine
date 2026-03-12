@@ -195,7 +195,7 @@ if ! is_claude_model "$ANTHROPIC_MODEL"; then
 fi
 
 # Check actor models (extract from USER_CMD)
-ACTOR_MODELS=$(echo "$USER_CMD" | grep -oP '(?<=--actor-models )[\w\-\./ ]+(?= --|$)' || true)
+ACTOR_MODELS=$(echo "$USER_CMD" | grep -oP '(?<=--actor-models )([\w\-\./]+)( [\w\-\./]+)*(?= --|$)' || true)
 for m in $ACTOR_MODELS; do
     if ! is_claude_model "$m"; then
         NEED_PROXY=true

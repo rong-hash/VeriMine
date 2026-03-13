@@ -130,7 +130,7 @@ class ActorValidator:
         try:
             await executor.execute(
                 query=prompt,
-                timeout=18000,  # 5 hours per actor run
+                timeout=25200,  # 7 hours per actor run
             )
         except Exception as e:
             log.error(f"Actor execution failed: {e}")

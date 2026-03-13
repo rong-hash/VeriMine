@@ -20,7 +20,36 @@
 - 是否需要编译 verilator model 或其他预处理步骤
 - 是否有 submodule 需要初始化
 
-### Step 3: 搭建环境
+### Step 3: 检查并修复 testbench 终止信号
+
+⚠️ 这一步非常重要！
+
+很多 Verilog testbench 缺少终止信号（`$finish` 或 `$stop`），会导致仿真无限运行。你必须检查所有 testbench 文件：
+
+1. **检查 Verilog/SystemVerilog testbench 文件**（`*_tb.v`, `*_tb.sv`, `tb_*.v`, `tb_*.sv` 等）:
+   - 搜索 `$finish` 或 `$stop` 语句
+   - 如果没有找到，说明仿真会无限运行
+
+2. **检查 cocotb 测试文件**（`test_*.py`）:
+   - cocotb 测试通常有自动终止机制，但也要检查是否有死循环
+
+3. **检查 Verilator C++ testbench**（`*_tb.cpp`, `sim_*.cpp`）:
+   - 搜索 `finish()` 或循环终止条件
+
+4. **如果 testbench 缺少终止信号，修复它**：
+   - 在 testbench 中添加 `$finish` 语句
+   - 常见方式：在 initial 块末尾添加，或在超时条件后添加
+   - 例如添加一个 watchdog timer：
+     ```verilog
+     initial begin
+         #10000000;  // 超时时间，根据仿真复杂度调整
+         $display("TIMEOUT: Simulation watchdog triggered");
+         $finish;
+     end
+     ```
+   - 注意不要破坏原有的测试逻辑
+
+### Step 4: 搭建环境
 实际尝试安装依赖、编译、运行测试。遇到报错就修复，直到环境可用。
 
 可用的工具：
@@ -30,7 +59,7 @@
 - make, cmake (已安装)
 - cocotb 可通过 pip 安装
 
-### Step 4: 写 setup.sh
+### Step 5: 写 setup.sh
 把你搭建环境的所有步骤写成一个 `setup.sh` 脚本，放在 `{repo_path}/setup.sh`。
 这个脚本应该：
 - 安装所有 Python 依赖（pip install）
@@ -40,7 +69,7 @@
 - 设置环境变量（如果需要）
 - 脚本必须是幂等的（重复运行不报错）
 
-### Step 5: 判断可测试性
+### Step 6: 判断可测试性
 - 此仓库能否用 iverilog/verilator/cocotb 跑测试？
 - 如果需要商业工具（VCS, Questa, Xcelium）才能测试，标记为不可测试
 
@@ -63,6 +92,9 @@
     "build_system": "make|cmake|custom|none",
     "existing_test_commands": ["make sim", "cd tb && make"],
     "setup_sh_path": "{repo_path}/setup.sh",
+    "testbench_fixes": [
+        {{"file": "tb/tb_top.v", "fix": "added $finish watchdog"}}
+    ],
     "notes": ""
 }}
 ```

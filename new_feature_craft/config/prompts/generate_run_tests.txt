@@ -35,18 +35,15 @@
 - 处理编译错误和运行错误
 - 即使部分测试失败，也要继续运行其他测试并汇总结果
 - 最后一定要生成 `result.json`
-- 脚本总运行时间不应超过 {test_timeout} 秒
 
-### ⚠️ 关键：防止仿真无限运行
-很多 Verilog testbench 没有正确的 `$finish` 语句，或者 finish 条件永远无法满足，导致仿真永远运行不停。
-**你必须对每个仿真添加超时保护：**
-- 使用 `timeout` 命令限制每个 `vvp` / `verilator` 仿真的运行时间，例如：
+### 超时保护
+- 使用 `timeout` 命令为每个仿真添加超时保护，超时时间设为 **3 小时**（10800 秒）
   ```bash
-  timeout 120 vvp sim.vvp   # 单个仿真最多运行 120 秒
+  timeout 10800 vvp sim.vvp
+  timeout 10800 make SIM=icarus
   ```
 - 如果 `timeout` 返回 exit code 124，标记该测试为 FAIL（原因：simulation timeout）
-- 建议单个测试超时设为 120-300 秒（根据仿真复杂度调整）
-- cocotb 测试也要加 timeout：`timeout 300 make SIM=icarus`
+- 注意：Phase 1 已经检查并修复了 testbench 中缺失的 `$finish` 终止信号，正常情况下仿真应该能自行终止。这个 3 小时超时只是最后的安全网。
 
 ### Bash 脚本编写注意事项
 - 使用 `[[ ]]` 时确保变量被正确引用：`[[ "$var" -eq 0 ]]`

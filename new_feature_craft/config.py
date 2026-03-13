@@ -31,9 +31,9 @@ class CraftConfig:
     quality_threshold: float = 6.5          # Minimum query quality score
 
     # Timeouts (seconds)
-    test_timeout: int = 300                 # Test execution timeout
-    module_timeout: int = 5400              # Single module processing (90min)
-    repo_timeout: int = 14400               # Single repo timeout (4h)
+    test_timeout: int = 10800               # Test execution timeout (3h)
+    module_timeout: int = 25200             # Single module processing (7h)
+    repo_timeout: int = 54000               # Single repo timeout (15h)
 
     # Parallelism
     max_concurrent_repos: int = 5

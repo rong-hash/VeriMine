@@ -83,7 +83,7 @@ class TestSetup:
         try:
             result = await executor.execute_with_json_retry(
                 query=prompt,
-                timeout=18000,
+                timeout=25200,
                 max_retries=3,
                 must_include_keys=["test_framework", "is_testable"],
             )
@@ -153,7 +153,7 @@ class TestSetup:
         repo_analysis: Dict,
         output_dir: Path,
         log: logging.Logger,
-        max_refine: int = 2,
+        max_refine: int = 3,
     ) -> Optional[Path]:
         """
         Generate run-tests.sh using LLM, validate, and refine if needed.
@@ -189,7 +189,7 @@ class TestSetup:
         try:
             result = await executor.execute_with_json_retry(
                 query=prompt,
-                timeout=18000,
+                timeout=25200,
                 max_retries=3,
                 must_include_keys=["run_tests_sh"],
             )
@@ -248,7 +248,7 @@ class TestSetup:
                     refine_result = await executor.execute_with_json_retry(
                         query=refine_prompt,
                         continue_conversation=True,
-                        timeout=18000,
+                        timeout=25200,
                         max_retries=2,
                         must_include_keys=["run_tests_sh"],
                     )

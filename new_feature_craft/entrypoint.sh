@@ -194,8 +194,22 @@ if ! is_claude_model "$ANTHROPIC_MODEL"; then
     PROXY_MODEL="$ANTHROPIC_MODEL"
 fi
 
-# Check actor models (extract from USER_CMD)
-ACTOR_MODELS=$(echo "$USER_CMD" | grep -oP '(?<=--actor-models )([\w\-\./]+)( [\w\-\./]+)*(?= --|$)' || true)
+# Check actor models from USER_CMD
+# Parse --actor-models by converting cmd to one-arg-per-line, then extract values after the flag
+ACTOR_MODELS=""
+_in_actor=false
+for _tok in $USER_CMD; do
+    if [ "$_tok" = "--actor-models" ]; then
+        _in_actor=true
+        continue
+    fi
+    if $_in_actor; then
+        case "$_tok" in --*) break ;; esac
+        ACTOR_MODELS="$ACTOR_MODELS $_tok"
+    fi
+done
+
+echo "Parsed actor models: $ACTOR_MODELS"
 for m in $ACTOR_MODELS; do
     if ! is_claude_model "$m"; then
         NEED_PROXY=true
@@ -215,7 +229,6 @@ if [ "$NEED_PROXY" = true ]; then
     fi
 else
     echo "All models are Claude — no proxy needed"
-    export CLAUDE_CODE_RUN_MODE=remote
 fi
 
 # Activate virtual environment

@@ -25,7 +25,7 @@ class QueryCrafter:
         self,
         model: str,
         quality_threshold: float = 6.5,
-        max_query_refine: int = 2,
+        max_query_refine: int = 3,
     ):
         self.model = model
         self.quality_threshold = quality_threshold
@@ -85,7 +85,7 @@ class QueryCrafter:
 
             result = await executor.execute_with_json_retry(
                 query=prompt,
-                timeout=18000,
+                timeout=25200,
                 max_retries=3,
                 must_include_keys=["query"],
             )
@@ -125,7 +125,7 @@ class QueryCrafter:
             eval_result = await executor.execute_with_json_retry(
                 query=eval_prompt,
                 continue_conversation=True,
-                timeout=18000,
+                timeout=25200,
                 max_retries=3,
                 must_include_keys=["overall_score"],
             )
@@ -188,7 +188,7 @@ class QueryCrafter:
             alignment = await executor.execute_with_json_retry(
                 query=alignment_prompt,
                 continue_conversation=True,
-                timeout=18000,
+                timeout=25200,
                 max_retries=2,
                 must_include_keys=["aligned"],
             )
@@ -238,7 +238,7 @@ class QueryCrafter:
             refine_result = await executor.execute_with_json_retry(
                 query=refine_prompt,
                 continue_conversation=True,
-                timeout=18000,
+                timeout=25200,
                 max_retries=2,
                 must_include_keys=["query"],
             )

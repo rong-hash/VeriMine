@@ -86,7 +86,7 @@ class ModuleMiner:
         try:
             result = await executor.execute_with_json_retry(
                 query=prompt,
-                timeout=18000,
+                timeout=25200,
                 max_retries=3,
                 must_include_keys=["candidates"],
             )

@@ -263,20 +263,11 @@ class ClaudeCodeExecutor:
         # Initialize session manager for session persistence
         self.session_manager = None  # Will be initialized after logger is set
 
+        # Log prefix: [model][task_name] for every message from this executor
+        self._log_prefix = f"[{self.model}][{task_name}]"
+
         if logger:
             self.logger = logger
-            # Add model prefix to existing logger's formatters (only if not already present)
-            for handler in self.logger.handlers:
-                if handler.formatter:
-                    old_fmt = handler.formatter._fmt
-                    # Check if model prefix already exists to avoid duplication
-                    if not old_fmt.startswith(f"[{self.model}]"):
-                        new_fmt = f"[{self.model}] {old_fmt}"
-                        handler.setFormatter(
-                            logging.Formatter(
-                                new_fmt, datefmt=handler.formatter.datefmt
-                            )
-                        )
         else:
             self.logger = setup_logger(
                 self.output_dir / f"{task_name}.log", f"{self.model}-{task_name}"
@@ -357,7 +348,8 @@ class ClaudeCodeExecutor:
                 self.output_dir / f"{task_name}.log", f"{self.model}-{task_name}"
             )
 
-        logger.info(f"Query: {query[:200]}... (continue: {continue_conversation})")
+        pfx = self._log_prefix
+        logger.info(f"{pfx} Query: {query[:200]}... (continue: {continue_conversation})")
 
         async def _execute_with_timeout():
             self.client.options.continue_conversation = continue_conversation
@@ -390,17 +382,17 @@ class ClaudeCodeExecutor:
                     content_blocks = []
                     for block in message.content:
                         if isinstance(block, TextBlock):
-                            logger.info(f"[Assistant] {block.text[:200]}...")
+                            logger.info(f"{pfx} [Assistant] {block.text[:200]}...")
                             block_data = {"type": "text", "text": block.text}
                         elif isinstance(block, ThinkingBlock):
-                            logger.info(f"[Thinking] {block.thinking[:200]}...")
+                            logger.info(f"{pfx} [Thinking] {block.thinking[:200]}...")
                             block_data = {
                                 "type": "thinking",
                                 "thinking": block.thinking,
                             }
                         elif isinstance(block, ToolUseBlock):
                             logger.info(
-                                f"[Tool: {block.name}] {str(block.input)[:100]}..."
+                                f"{pfx} [Tool: {block.name}] {str(block.input)[:100]}..."
                             )
                             block_data = {
                                 "type": "tool_use",
@@ -409,7 +401,7 @@ class ClaudeCodeExecutor:
                                 "input": block.input,
                             }
                         elif isinstance(block, ToolResultBlock):
-                            logger.info(f"[Tool Result]: {str(block.content)[:100]}...")
+                            logger.info(f"{pfx} [Tool Result]: {str(block.content)[:100]}...")
                             block_data = {
                                 "type": "tool_result",
                                 "tool_use_id": block.tool_use_id,
@@ -477,7 +469,7 @@ class ClaudeCodeExecutor:
         try:
             return await asyncio.wait_for(_execute_with_timeout(), timeout=timeout)
         except asyncio.TimeoutError:
-            logger.error(f"Execution timed out after {timeout} seconds")
+            logger.error(f"{pfx} Execution timed out after {timeout} seconds")
             raise
 
     def _parse_json_from_text(
@@ -545,12 +537,13 @@ class ClaudeCodeExecutor:
                 self.output_dir / f"{task_name}.log", f"{self.model}-{task_name}"
             )
 
+        pfx = self._log_prefix
         original_query = query
 
         for attempt in range(max_retries):
             continue_conversation = True if attempt > 0 else continue_conversation
             try:
-                logger.info(f"Execution attempt {attempt + 1}/{max_retries}")
+                logger.info(f"{pfx} Execution attempt {attempt + 1}/{max_retries}")
                 result = await self.execute(
                     query, continue_conversation, timeout, task_name
                 )
@@ -560,11 +553,11 @@ class ClaudeCodeExecutor:
                 data, error_msg = self._parse_json_from_text(result_text)
                 if data is None:
                     logger.warning(
-                        f"Attempt {attempt + 1}: Failed to parse JSON - {error_msg}"
+                        f"{pfx} Attempt {attempt + 1}: Failed to parse JSON - {error_msg}"
                     )
                     if attempt < max_retries - 1:
                         logger.info(
-                            "Retrying with error details and format reminder..."
+                            f"{pfx} Retrying with error details and format reminder..."
                         )
                         query = f"Previous output failed to parse: {error_msg}\n\nYou MUST output the required valid JSON in the format:\n```json\n{{...}}\n```"
                     continue
@@ -574,23 +567,23 @@ class ClaudeCodeExecutor:
                     missing_keys = [key for key in must_include_keys if key not in data]
                     if missing_keys:
                         logger.warning(
-                            f"Attempt {attempt + 1}: Missing required keys: {missing_keys}"
+                            f"{pfx} Attempt {attempt + 1}: Missing required keys: {missing_keys}"
                         )
                         if attempt < max_retries - 1:
-                            logger.info("Retrying with reminder about required keys...")
+                            logger.info(f"{pfx} Retrying with reminder about required keys...")
                             keys_str = ", ".join(must_include_keys)
                             # query = f"{original_query}\n\n⚠️ CRITICAL: You MUST include the required valid JSON with these keys: {keys_str}."
                             query = f"You MUST output the required valid JSON in the format:\n```json\n{{...}}\n```\nMake sure to include all required keys: {keys_str}"
                         continue
 
                 logger.info(
-                    f"✓ Successfully parsed and validated JSON on attempt {attempt + 1}"
+                    f"{pfx} ✓ Successfully parsed and validated JSON on attempt {attempt + 1}"
                 )
                 return data
 
             except Exception as e:
                 error_msg = str(e)
-                logger.error(f"Attempt {attempt + 1}: Execution error: {e}")
+                logger.error(f"{pfx} Attempt {attempt + 1}: Execution error: {e}")
 
                 # 🆕 判断是否是临时性错误（网络、超时、服务不可用）
                 is_temporary_error = any([
@@ -608,8 +601,8 @@ class ClaudeCodeExecutor:
                 if is_temporary_error and attempt < max_retries - 1:
                     # 指数退避：2秒、4秒、8秒、16秒
                     wait_time = min(2 ** attempt, 30)  # 最多等待30秒
-                    logger.warning(f"⚠️ 检测到临时性错误，{wait_time}秒后重试...")
-                    logger.warning(f"错误详情: {error_msg}")
+                    logger.warning(f"{pfx} Temporary error, retrying in {wait_time}s...")
+                    logger.warning(f"{pfx} Error: {error_msg}")
                     time.sleep(wait_time)
                     # 重置query为原始query（不要继续使用之前的错误提示）
                     query = original_query
@@ -617,12 +610,12 @@ class ClaudeCodeExecutor:
 
                 # 🆕 如果是最后一次重试，记录详细错误信息但不抛出异常
                 if attempt >= max_retries - 1:
-                    logger.error(f"❌ 所有重试均失败 ({max_retries} 次)")
-                    logger.error(f"最后一次错误: {error_msg}")
+                    logger.error(f"{pfx} All {max_retries} retries failed")
+                    logger.error(f"{pfx} Last error: {error_msg}")
                     # 不抛出异常，返回None让调用者决定如何处理
                     return None
 
-        logger.error(f"Failed to get valid JSON after {max_retries} attempts")
+        logger.error(f"{pfx} Failed to get valid JSON after {max_retries} attempts")
         return None
 
     async def disconnect(self):

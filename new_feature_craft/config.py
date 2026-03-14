@@ -27,13 +27,13 @@ class CraftConfig:
 
     # Mining parameters
     modules_per_repo: int = 3               # Max modules to mine per repo
-    actor_validation_runs: int = 4          # Runs per actor per query level
+    actor_validation_runs: int = 4          # Runs per actor
     quality_threshold: float = 6.5          # Minimum query quality score
 
     # Timeouts (seconds)
     test_timeout: int = 10800               # Test execution timeout (3h)
     module_timeout: int = 25200             # Single module processing (7h)
-    repo_timeout: int = 54000               # Single repo timeout (15h)
+    repo_timeout: int = 126000              # Single repo timeout (35h)
 
     # Parallelism
     max_concurrent_repos: int = 5

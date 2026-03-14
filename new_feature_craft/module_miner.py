@@ -1,11 +1,14 @@
 """
 Module Miner - Phase 3 of the new_feature_craft pipeline.
 
-Identifies core RTL modules, removes them, and validates that:
-  - base state (module removed): tests FAIL
-  - target state (module restored): tests PASS
+Identifies core RTL modules, removes them (by line ranges), and validates:
+  - base state (code removed): tests FAIL
+  - target state (code restored): tests PASS
 
-This is the key differentiator from the PR-based pipeline.
+Supports three removal modes:
+  1. Whole file deletion (start_line=1, end_line=-1)
+  2. Partial file deletion (specific line range within a file)
+  3. Cross-file deletion (ranges across multiple files)
 """
 from __future__ import annotations
 
@@ -15,10 +18,10 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from agents.claude_code_executor import ClaudeCodeExecutor, setup_logger
-from models import ModuleInfo, ModuleMining
+from models import ModuleInfo, ModuleMining, RemovalRange
 from test_setup import run_test_script
 
 logger = logging.getLogger(__name__)
@@ -61,11 +64,7 @@ class ModuleMiner:
         output_dir: Path,
         log: logging.Logger,
     ) -> List[ModuleInfo]:
-        """
-        Use LLM to identify candidate modules for mining.
-
-        Returns list of ModuleInfo, sorted by importance_score descending.
-        """
+        """Use LLM to identify candidate modules for mining."""
         phase_dir = output_dir / "phase3_module_mining"
         phase_dir.mkdir(parents=True, exist_ok=True)
 
@@ -97,10 +96,26 @@ class ModuleMiner:
 
             candidates = []
             for c in result["candidates"][:self.max_modules]:
+                # Parse removal_ranges
+                ranges = []
+                for r in c.get("removal_ranges", []):
+                    ranges.append(RemovalRange(
+                        file=r.get("file", ""),
+                        start_line=int(r.get("start_line", 1)),
+                        end_line=int(r.get("end_line", -1)),
+                    ))
+
+                # Fallback: if no removal_ranges but has file_path / dependent_files
+                if not ranges:
+                    fp = c.get("file_path", "")
+                    deps = c.get("dependent_files", [])
+                    for f in (deps or [fp]):
+                        if f:
+                            ranges.append(RemovalRange(file=f, start_line=1, end_line=-1))
+
                 info = ModuleInfo(
                     module_name=c.get("module_name", ""),
-                    file_path=c.get("file_path", ""),
-                    dependent_files=c.get("dependent_files", []),
+                    removal_ranges=ranges,
                     importance_score=float(c.get("importance_score", 0)),
                     reasoning=c.get("reasoning", ""),
                     test_files=c.get("test_files", []),
@@ -108,7 +123,6 @@ class ModuleMiner:
                 )
                 candidates.append(info)
 
-            # Sort by importance
             candidates.sort(key=lambda x: x.importance_score, reverse=True)
 
             log.info(f"Identified {len(candidates)} candidate modules: "
@@ -133,7 +147,99 @@ class ModuleMiner:
                 pass
 
     # ------------------------------------------------------------------
-    # Phase 3b: Mine a single module (remove → test fail → restore → test pass)
+    # Line-range removal and restoration
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _remove_ranges(
+        repo_path: Path,
+        ranges: List[RemovalRange],
+        log: logging.Logger,
+    ) -> List[Dict[str, Any]]:
+        """
+        Remove specified line ranges from files. Returns list of removed content
+        for later restoration.
+
+        Each entry: {"file": path, "start_line": int, "end_line": int,
+                      "content": str, "was_whole_file": bool}
+        """
+        removed = []
+
+        for r in ranges:
+            abs_path = repo_path / r.file
+            if not abs_path.exists():
+                log.warning(f"File not found: {abs_path}")
+                continue
+
+            lines = abs_path.read_text(encoding="utf-8", errors="replace").split("\n")
+            total_lines = len(lines)
+
+            # Resolve end_line=-1 to actual last line
+            start = r.start_line  # 1-based
+            end = total_lines if r.end_line == -1 else r.end_line
+
+            # Clamp
+            start = max(1, min(start, total_lines))
+            end = max(start, min(end, total_lines))
+
+            is_whole_file = (start == 1 and end >= total_lines)
+
+            # Extract content (convert to 0-based indexing)
+            removed_lines = lines[start - 1:end]
+            content = "\n".join(removed_lines)
+
+            removed.append({
+                "file": r.file,
+                "start_line": start,
+                "end_line": end,
+                "content": content,
+                "was_whole_file": is_whole_file,
+            })
+
+            if is_whole_file:
+                # Delete entire file
+                abs_path.unlink()
+                log.info(f"Removed whole file: {r.file} ({total_lines} lines)")
+            else:
+                # Remove specific lines, keep the rest
+                remaining = lines[:start - 1] + lines[end:]
+                abs_path.write_text("\n".join(remaining), encoding="utf-8")
+                log.info(f"Removed lines {start}-{end} from {r.file} "
+                         f"({end - start + 1} lines)")
+
+        return removed
+
+    @staticmethod
+    def _restore_ranges(
+        repo_path: Path,
+        removed_content: List[Dict[str, Any]],
+        log: logging.Logger,
+    ):
+        """Restore previously removed line ranges."""
+        for entry in removed_content:
+            abs_path = repo_path / entry["file"]
+            content_lines = entry["content"].split("\n")
+
+            if entry["was_whole_file"]:
+                # Recreate the file
+                abs_path.parent.mkdir(parents=True, exist_ok=True)
+                abs_path.write_text(entry["content"], encoding="utf-8")
+                log.info(f"Restored whole file: {entry['file']}")
+            else:
+                if not abs_path.exists():
+                    log.warning(f"Cannot restore lines to missing file: {abs_path}")
+                    continue
+                # Re-insert lines at the original position
+                lines = abs_path.read_text(encoding="utf-8", errors="replace").split("\n")
+                start = entry["start_line"]  # 1-based
+                insert_pos = start - 1  # 0-based
+                lines = lines[:insert_pos] + content_lines + lines[insert_pos:]
+                abs_path.write_text("\n".join(lines), encoding="utf-8")
+                log.info(f"Restored lines {entry['start_line']}-{entry['end_line']} "
+                         f"in {entry['file']}")
+
+    # ------------------------------------------------------------------
+    # Phase 3b: Mine a single module
     # ------------------------------------------------------------------
 
     async def mine_module(
@@ -146,13 +252,11 @@ class ModuleMiner:
     ) -> Optional[ModuleMining]:
         """
         Attempt to mine a single module:
-        1. Save module files content
-        2. Remove module files → base state
+        1. Save content of removal ranges
+        2. Remove code → base state
         3. Run tests → must FAIL
-        4. Restore module files → target state
+        4. Restore code → target state
         5. Run tests → must PASS
-
-        Returns ModuleMining if valid, None otherwise.
         """
         module_dir = output_dir / f"module_{module_info.module_name}"
         module_dir.mkdir(parents=True, exist_ok=True)
@@ -161,56 +265,41 @@ class ModuleMiner:
         info_file = module_dir / "module_info.json"
         info_file.write_text(json.dumps({
             "module_name": module_info.module_name,
-            "file_path": module_info.file_path,
-            "dependent_files": module_info.dependent_files,
+            "removal_ranges": [
+                {"file": r.file, "start_line": r.start_line, "end_line": r.end_line}
+                for r in module_info.removal_ranges
+            ],
             "importance_score": module_info.importance_score,
             "reasoning": module_info.reasoning,
             "test_files": module_info.test_files,
             "estimated_complexity": module_info.estimated_complexity,
         }, indent=2, ensure_ascii=False), encoding="utf-8")
 
-        # Determine files to remove
-        files_to_remove = module_info.dependent_files
-        if not files_to_remove:
-            files_to_remove = [module_info.file_path]
-
-        # Step 1: Save file contents (gold patch)
-        module_content = {}
-        removed_files_dir = module_dir / "removed_files"
-        removed_files_dir.mkdir(parents=True, exist_ok=True)
-
-        for fpath in files_to_remove:
-            abs_path = repo_path / fpath
-            if abs_path.exists():
-                content = abs_path.read_text(encoding="utf-8", errors="replace")
-                module_content[fpath] = content
-                # Save a copy
-                backup_path = removed_files_dir / fpath
-                backup_path.parent.mkdir(parents=True, exist_ok=True)
-                backup_path.write_text(content, encoding="utf-8")
-                log.info(f"Saved: {fpath} ({len(content)} chars)")
-            else:
-                log.warning(f"File not found: {abs_path}")
-
-        if not module_content:
-            log.error(f"No files found for module {module_info.module_name}")
+        if not module_info.removal_ranges:
+            log.error(f"No removal ranges for module {module_info.module_name}")
             return None
 
-        mining = ModuleMining(
-            module_info=module_info,
-            removed_files=list(module_content.keys()),
-            module_content=module_content,
-        )
+        mining = ModuleMining(module_info=module_info)
 
-        # Step 2: Remove files → base state
-        log.info(f"Removing {len(module_content)} files for base state...")
-        for fpath in module_content:
-            abs_path = repo_path / fpath
-            if abs_path.exists():
-                abs_path.unlink()
-                log.info(f"Removed: {fpath}")
+        # Step 1: Remove code → base state
+        log.info(f"Removing code for {module_info.module_name} "
+                 f"({len(module_info.removal_ranges)} ranges)...")
+        removed_content = self._remove_ranges(repo_path, module_info.removal_ranges, log)
 
-        # Step 3: Run tests on base state → should FAIL
+        if not removed_content:
+            log.error(f"No content removed for module {module_info.module_name}")
+            return None
+
+        mining.removed_content = removed_content
+
+        # Save removed content
+        removed_dir = module_dir / "removed_files"
+        removed_dir.mkdir(parents=True, exist_ok=True)
+        for entry in removed_content:
+            backup_path = removed_dir / f"{entry['file'].replace('/', '_')}_L{entry['start_line']}-L{entry['end_line']}.v"
+            backup_path.write_text(entry["content"], encoding="utf-8")
+
+        # Step 2: Run tests on base state → should FAIL
         log.info("Running tests on base state (expecting FAIL)...")
         base_result = await run_test_script(
             repo_path=repo_path,
@@ -219,7 +308,6 @@ class ModuleMiner:
             log=log,
         )
 
-        # Save base test result
         base_result_file = module_dir / "base_test_result.json"
         base_result_file.write_text(
             json.dumps(base_result, indent=2, ensure_ascii=False),
@@ -227,21 +315,20 @@ class ModuleMiner:
         )
 
         if base_result["exit_code"] == 0 and base_result.get("pass_rate", 0) == 1.0:
-            log.warning(f"Base state tests PASSED — module removal had no effect! "
+            log.warning(f"Base state tests PASSED — removal had no effect! "
                         f"Skipping {module_info.module_name}")
-            # Restore files before returning
-            self._restore_files(repo_path, module_content, log)
+            self._restore_ranges(repo_path, removed_content, log)
             return None
 
         mining.base_state_valid = True
         log.info(f"Base state validation OK: exit_code={base_result['exit_code']}, "
                  f"pass_rate={base_result.get('pass_rate', 0)}")
 
-        # Step 4: Restore files → target state
-        log.info("Restoring module files for target state...")
-        self._restore_files(repo_path, module_content, log)
+        # Step 3: Restore code → target state
+        log.info("Restoring code for target state...")
+        self._restore_ranges(repo_path, removed_content, log)
 
-        # Step 5: Run tests on target state → should PASS
+        # Step 4: Run tests on target state → should PASS
         log.info("Running tests on target state (expecting PASS)...")
         target_result = await run_test_script(
             repo_path=repo_path,
@@ -257,7 +344,7 @@ class ModuleMiner:
         )
 
         if target_result["exit_code"] != 0:
-            log.warning(f"Target state tests FAILED — module restoration broken! "
+            log.warning(f"Target state tests FAILED! "
                         f"exit_code={target_result['exit_code']}")
             return None
 
@@ -265,15 +352,6 @@ class ModuleMiner:
         log.info(f"Target state validation OK: pass_rate={target_result.get('pass_rate', 0)}")
 
         return mining
-
-    @staticmethod
-    def _restore_files(repo_path: Path, module_content: Dict[str, str], log: logging.Logger):
-        """Restore removed module files from saved content."""
-        for fpath, content in module_content.items():
-            abs_path = repo_path / fpath
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            abs_path.write_text(content, encoding="utf-8")
-            log.info(f"Restored: {fpath}")
 
     # ------------------------------------------------------------------
     # Phase 3: Full mining pipeline for a repo
@@ -287,10 +365,7 @@ class ModuleMiner:
         output_dir: Path,
         log: logging.Logger,
     ) -> List[ModuleMining]:
-        """
-        Full Phase 3: identify candidates → mine each → return valid ones.
-        """
-        # Identify candidates
+        """Full Phase 3: identify candidates → mine each → return valid ones."""
         candidates = await self.identify_candidates(
             repo_path, repo_analysis, output_dir, log
         )
@@ -298,7 +373,6 @@ class ModuleMiner:
             log.warning("No candidate modules found")
             return []
 
-        # Mine each candidate
         valid_minings = []
         for i, candidate in enumerate(candidates):
             log.info(f"Mining module {i+1}/{len(candidates)}: {candidate.module_name}")
@@ -317,12 +391,17 @@ class ModuleMiner:
                     log.info(f"Module {candidate.module_name}: INVALID mining target")
             except Exception as e:
                 log.error(f"Failed to mine {candidate.module_name}: {e}")
-                # Ensure files are restored on error
-                self._restore_files(
-                    repo_path,
-                    {f: "" for f in candidate.dependent_files or [candidate.file_path]},
-                    log,
-                )
+                # Ensure code is restored on error
+                try:
+                    self._restore_ranges(
+                        repo_path,
+                        [{"file": r.file, "start_line": r.start_line,
+                          "end_line": r.end_line, "content": "", "was_whole_file": False}
+                         for r in candidate.removal_ranges],
+                        log,
+                    )
+                except Exception:
+                    pass
 
         log.info(f"Phase 3 complete: {len(valid_minings)}/{len(candidates)} valid modules")
         return valid_minings

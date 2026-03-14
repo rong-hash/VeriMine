@@ -101,12 +101,9 @@ class ActorValidator:
             log.error(f"Failed to copy repo: {e}")
             return result
 
-        # Remove module files (create base state)
-        for fpath in mining.removed_files:
-            target = work_repo / fpath
-            if target.exists():
-                target.unlink()
-                log.info(f"Removed from working copy: {fpath}")
+        # Remove code ranges (create base state)
+        from module_miner import ModuleMiner
+        ModuleMiner._remove_ranges(work_repo, mining.module_info.removal_ranges, log)
 
         # Copy run-tests.sh to working copy
         work_run_tests = work_repo / "run-tests.sh"
@@ -130,7 +127,7 @@ class ActorValidator:
         try:
             await executor.execute(
                 query=prompt,
-                timeout=25200,  # 7 hours per actor run
+                timeout=14400,  # 4 hours per actor run
             )
         except Exception as e:
             log.error(f"Actor execution failed: {e}")

@@ -4,6 +4,7 @@ Data models for the new_feature_craft pipeline.
 Defines all dataclasses used across phases:
 - CraftTask: Final output per module
 - ModuleInfo: Candidate module metadata
+- RemovalRange: A single (file, start_line, end_line) range to remove
 - ModuleMining: Mining result with validation
 - QueryResult: Generated query with score
 - ActorResult: Single actor validation run
@@ -15,11 +16,24 @@ from typing import Any, Dict, List, Optional
 
 
 @dataclass
+class RemovalRange:
+    """A range of lines to remove from a file.
+
+    - file: relative path within the repo
+    - start_line: first line to remove (1-based, inclusive)
+    - end_line: last line to remove (1-based, inclusive)
+    - If start_line=1 and end_line=total lines, equivalent to deleting the whole file.
+    """
+    file: str
+    start_line: int
+    end_line: int
+
+
+@dataclass
 class ModuleInfo:
     """Metadata for a candidate module identified by the miner."""
     module_name: str
-    file_path: str
-    dependent_files: List[str] = field(default_factory=list)
+    removal_ranges: List[RemovalRange] = field(default_factory=list)
     importance_score: float = 0.0
     reasoning: str = ""
     test_files: List[str] = field(default_factory=list)
@@ -30,10 +44,10 @@ class ModuleInfo:
 class ModuleMining:
     """Result of mining (removing) a module and validating base/target states."""
     module_info: ModuleInfo
-    removed_files: List[str] = field(default_factory=list)
+    removed_content: List[Dict[str, Any]] = field(default_factory=list)
+    # Each entry: {"file": path, "start_line": int, "end_line": int, "content": str}
     base_state_valid: bool = False       # base tests FAIL (module removed)
     target_state_valid: bool = False     # target tests PASS (module restored)
-    module_content: Dict[str, str] = field(default_factory=dict)  # {path: content}
 
 
 @dataclass

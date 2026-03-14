@@ -12,11 +12,46 @@
 
 从仓库中选出最多 {max_modules} 个适合 "挖去" 的功能模块。挖去后，相关测试应该 FAIL（因为模块未定义），恢复后测试应该 PASS。
 
+## 删除方式
+
+你需要指定要删除的代码范围。支持三种删除方式：
+
+### 方式 1：删除整个文件
+模块独占一个文件时使用。指定 `start_line=1, end_line=-1`（-1 表示文件最后一行）。
+```json
+"removal_ranges": [
+    {{"file": "rtl/fifo.v", "start_line": 1, "end_line": -1}}
+]
+```
+
+### 方式 2：删除文件中的部分代码（某个 module 定义）
+多个模块共存一个文件时使用。指定 module 的起止行号。
+```json
+"removal_ranges": [
+    {{"file": "rtl/cpu.v", "start_line": 2420, "end_line": 2510}}
+]
+```
+
+### 方式 3：跨文件删除
+一个 feature 分布在多个文件中时使用。
+```json
+"removal_ranges": [
+    {{"file": "rtl/dma_engine.v", "start_line": 1, "end_line": -1}},
+    {{"file": "rtl/dma_desc.v", "start_line": 1, "end_line": -1}}
+]
+```
+
+⚠️ **重要原则**：
+- 删除的必须是一个 **完整的 feature/功能**，不是零散的代码片段
+- 可以跨文件，但所有删除的代码必须属于同一个功能特性
+- 行号必须准确！请用 grep -n 或 cat -n 确认 module 的起止行
+- 删除的范围必须是完整的 module 定义（从 `module xxx` 到对应的 `endmodule`），不能删半个 module
+
 ## 选择标准（按优先级排序）
 
 ### 必须满足
 1. **有 testbench 覆盖**：必须有至少一个测试会因为该模块缺失而失败
-2. **自包含**：模块实现集中在 1-3 个文件中（不是分散在几十个文件里）
+2. **自包含**：删除范围明确，不会破坏不相关的代码
 3. **非 trivial**：模块有实际功能逻辑，不是简单的 wire 连接或 mux
 4. **可独立删除**：删除后不会导致整个项目无法编译（只影响相关测试）
 
@@ -35,10 +70,11 @@
 ## 分析步骤
 
 1. 浏览仓库目录结构，理解设计层次
-2. 读取核心 RTL 文件，理解模块功能
+2. 读取核心 RTL 文件，用 `cat -n` 或 `grep -n "^module"` 确认每个 module 的行号
 3. 读取 testbench 文件，理解测试覆盖关系
 4. 对候选模块逐一评估上述标准
 5. 排序并选出最佳候选
+6. 对每个候选，精确标注 removal_ranges（文件路径 + 起止行号）
 
 ## 输出格式
 
@@ -48,15 +84,14 @@
 {{
     "candidates": [
         {{
-            "module_name": "fifo_async",
-            "file_path": "rtl/fifo_async.v",
-            "dependent_files": ["rtl/fifo_async.v", "rtl/gray_counter.v"],
+            "module_name": "picorv32_pcpi_div",
+            "removal_ranges": [
+                {{"file": "rtl/picorv32.v", "start_line": 2420, "end_line": 2510}}
+            ],
             "importance_score": 8.5,
-            "reasoning": "核心异步 FIFO 模块，有完整的 testbench 覆盖...",
-            "test_files": ["tb/test_fifo.py", "tb/tb_fifo.sv"],
-            "estimated_complexity": "medium",
-            "estimated_lines": 200,
-            "removal_impact": "删除后 FIFO 相关测试将编译失败（模块未定义）"
+            "reasoning": "PCPI 除法扩展模块，有完整 testbench 覆盖...",
+            "test_files": ["tests/div_tb.v"],
+            "estimated_complexity": "medium"
         }}
     ],
     "repo_structure_summary": "简要描述仓库的设计层次和模块关系",
@@ -65,6 +100,8 @@
 ```
 
 注意：
-- `dependent_files` 包含删除该模块需要移除的所有文件（通常是模块本身，可能包含紧密耦合的子模块）
+- `removal_ranges` 是一个列表，每项包含 file, start_line, end_line
+- end_line=-1 表示到文件末尾（等价于删除整个文件）
+- 行号是 1-based（与 cat -n 一致）
 - `importance_score` 范围 0-10，越高表示越适合作为 mining 目标
 - `estimated_complexity`: "low" (<50 行), "medium" (50-500 行), "high" (>500 行)

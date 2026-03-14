@@ -253,11 +253,21 @@ echo "Execution complete. Exit code: $EXIT_CODE"
 echo "Output: $OUTPUT_DIR"
 echo "========================="
 
-# Copy results to final output
-if [ -d "$LOCAL_OUTPUT_DIR" ] && [ -n "$FINAL_OUTPUT_DIR" ]; then
-    echo "Syncing results to $FINAL_OUTPUT_DIR..."
-    mkdir -p "$FINAL_OUTPUT_DIR"
-    cp -r "$LOCAL_OUTPUT_DIR"/* "$FINAL_OUTPUT_DIR/" 2>/dev/null || true
+# Copy sandbox-specific logs into the pipeline output dir
+# (pipeline writes directly to workspace, so results are already there)
+SAFE_REPO_NAME=$(echo "$REPO_NAME" | tr '/' '_')
+PIPE_OUTPUT="/mnt/workspace/$(echo "$USER_CMD" | grep -oP '(?<=--output )\S+')"
+REPO_OUT_DIR="$PIPE_OUTPUT/$SAFE_REPO_NAME"
+if [ -d "$REPO_OUT_DIR" ]; then
+    cp "$OUTPUT_DIR/execution.log" "$REPO_OUT_DIR/" 2>/dev/null || true
+    cp "$OUTPUT_DIR"/setup_env_*.log "$REPO_OUT_DIR/" 2>/dev/null || true
+    cp "$OUTPUT_DIR/proxy_server.log" "$REPO_OUT_DIR/" 2>/dev/null || true
+    cp "$OUTPUT_DIR/git_clone.log" "$REPO_OUT_DIR/" 2>/dev/null || true
+fi
+
+# Clean up eda-sandbox-X output dir
+if [ -d "$OUTPUT_DIR" ]; then
+    rm -rf "$OUTPUT_DIR"
 fi
 
 exit $EXIT_CODE

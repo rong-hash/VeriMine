@@ -29,7 +29,7 @@ FLASH_MODEL=${5:-$MODEL}
 CONCURRENCY=${6:-50}
 MODULES_PER_REPO=${7:-3}
 TEST_TIMEOUT=${8:-10800}
-REPO_TIMEOUT=${9:-900}
+REPO_TIMEOUT=${9:-2100}
 ACTOR_MODELS_INPUT=${10:-$MODEL}
 ACTOR_MODELS=$(echo "$ACTOR_MODELS_INPUT" | tr ',' ' ')
 VALIDATION_RUNS=${11:-4}
@@ -56,25 +56,24 @@ echo "Validation Runs: $VALIDATION_RUNS"
 echo "Input File: $INPUT_FILE"
 echo "========================================"
 
-# Paths inside sandbox
-LOCAL_OUTPUT_DIR=/tmp/dataset
-FINAL_OUTPUT_DIR=/mnt/workspace/$TASK/output
+# Paths inside sandbox — write directly to workspace for real-time visibility
+OUTPUT_DIR=/mnt/workspace/$TASK/output
 
 # Build the craft command (runs inside sandbox)
 cmd="uv run python __main__.py \
     --repo \$REPO_NAME \
     --repo-path \$REPO_PATH \
-    --output $LOCAL_OUTPUT_DIR \
+    --output $OUTPUT_DIR \
     --model $MODEL \
     --flash-model $FLASH_MODEL \
     --modules-per-repo $MODULES_PER_REPO \
     --test-timeout $TEST_TIMEOUT \
+    --module-timeout $((REPO_TIMEOUT * 60 / 3)) \
     --repo-timeout $((REPO_TIMEOUT * 60)) \
     --quality-threshold 6.5 \
     --validation-runs $VALIDATION_RUNS \
     --actor-models $ACTOR_MODELS \
-    --run-mode remote \
-    --copy-to-final $FINAL_OUTPUT_DIR"
+    --run-mode remote"
 
 # Rollout output dir (local)
 ROLLOUT_OUTPUT_DIR="/tmp/rollouts/${EXPERIMENT_NAME}"

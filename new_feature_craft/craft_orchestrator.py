@@ -397,33 +397,32 @@ class CraftOrchestrator:
         """
         Package a completed task into a clean deliverable folder:
           task_{module_name}/
-          ├── repo/              # base state repo (module removed)
-          ├── code.patch         # unified diff to restore module (gold patch)
+          ├── repo/              # base state repo (code removed)
+          ├── code.patch         # unified diff to restore code (gold patch)
           ├── run-tests.sh       # test script
           └── query.txt          # task query
         """
+        from module_miner import ModuleMiner
+
         module_name = mining.module_info.module_name
         task_dir = self.output_dir / f"task_{module_name}"
         task_dir.mkdir(parents=True, exist_ok=True)
 
         self.logger.info(f"Packaging task: {task_dir}")
 
-        # 1. Copy repo as base state (with module removed)
+        # 1. Copy repo and apply removals to create base state
         base_repo = task_dir / "repo"
         if base_repo.exists():
             shutil.rmtree(base_repo)
         try:
             shutil.copytree(repo_path, base_repo, symlinks=True)
-            # Remove module files to create base state
-            for fpath in mining.removed_files:
-                target = base_repo / fpath
-                if target.exists():
-                    target.unlink()
-                    self.logger.info(f"Removed from base repo: {fpath}")
-            # Clean up .git to save space (keep shallow clone info)
+            # Apply the same removal ranges to the copy
+            ModuleMiner._remove_ranges(
+                base_repo, mining.module_info.removal_ranges, self.logger
+            )
+            # Clean up .git to save space
             git_dir = base_repo / ".git"
             if git_dir.exists():
-                # Keep .git but remove large objects
                 for subdir in ["objects/pack"]:
                     pack_dir = git_dir / subdir
                     if pack_dir.exists():
@@ -432,25 +431,38 @@ class CraftOrchestrator:
         except Exception as e:
             self.logger.error(f"Failed to create base repo: {e}")
 
-        # 2. Generate code.patch (unified diff format)
+        # 2. Generate code.patch from removed_content
         patch_path = task_dir / "code.patch"
         try:
             patch_lines = []
-            for fpath, content in mining.module_content.items():
-                # Generate unified diff: /dev/null -> file (new file)
-                patch_lines.append(f"--- /dev/null")
-                patch_lines.append(f"+++ b/{fpath}")
+            for entry in mining.removed_content:
+                fpath = entry["file"]
+                start = entry["start_line"]
+                end = entry["end_line"]
+                content = entry["content"]
                 content_lines = content.split("\n")
-                # Remove trailing empty line if present
+                # Remove trailing empty line
                 if content_lines and content_lines[-1] == "":
                     content_lines = content_lines[:-1]
-                patch_lines.append(f"@@ -0,0 +1,{len(content_lines)} @@")
+                n_lines = len(content_lines)
+
+                if entry.get("was_whole_file", False):
+                    # New file patch
+                    patch_lines.append(f"--- /dev/null")
+                    patch_lines.append(f"+++ b/{fpath}")
+                    patch_lines.append(f"@@ -0,0 +1,{n_lines} @@")
+                else:
+                    # Insert lines at specific position
+                    patch_lines.append(f"--- a/{fpath}")
+                    patch_lines.append(f"+++ b/{fpath}")
+                    patch_lines.append(f"@@ -{start},0 +{start},{n_lines} @@")
+
                 for line in content_lines:
                     patch_lines.append(f"+{line}")
-                patch_lines.append("")  # blank line between files
+                patch_lines.append("")
 
             patch_path.write_text("\n".join(patch_lines), encoding="utf-8")
-            self.logger.info(f"Generated code.patch ({len(mining.module_content)} files)")
+            self.logger.info(f"Generated code.patch ({len(mining.removed_content)} ranges)")
         except Exception as e:
             self.logger.error(f"Failed to generate code.patch: {e}")
 
@@ -479,7 +491,11 @@ class CraftOrchestrator:
                 "task_id": task.task_id,
                 "repo_name": task.repo_name,
                 "module_name": module_name,
-                "removed_files": mining.removed_files,
+                "removal_ranges": [
+                    {"file": e["file"], "start_line": e["start_line"],
+                     "end_line": e["end_line"], "was_whole_file": e.get("was_whole_file", False)}
+                    for e in mining.removed_content
+                ],
                 "query_score": task.query_result.score if task.query_result else 0,
                 "base_state_valid": mining.base_state_valid,
                 "target_state_valid": mining.target_state_valid,

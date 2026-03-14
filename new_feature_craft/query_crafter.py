@@ -259,8 +259,13 @@ class QueryCrafter:
     @staticmethod
     def _build_golden_patch(mining: ModuleMining) -> str:
         golden_patch = ""
-        for fpath, content in mining.module_content.items():
-            header = f"=== {fpath} ===\n"
+        for entry in mining.removed_content:
+            fpath = entry["file"]
+            content = entry["content"]
+            if entry.get("was_whole_file", False):
+                header = f"=== {fpath} (whole file) ===\n"
+            else:
+                header = f"=== {fpath} lines {entry['start_line']}-{entry['end_line']} ===\n"
             if len(golden_patch) + len(header) + len(content) > 8000:
                 golden_patch += header + content[:2000] + "\n...(truncated)\n"
             else:
